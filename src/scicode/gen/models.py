@@ -87,10 +87,10 @@ def generate_openai_response(
     client_kwargs = {"api_key": key}
     if base_url is not None:
         client_kwargs["base_url"] = base_url
-    timeout = _setting("OPENAI_TIMEOUT", default="")
+    timeout = _setting("OPENAI_TIMEOUT", "OPENAI_TIMEOUT", default="")
     if timeout:
         client_kwargs["timeout"] = float(timeout)
-    max_retries = _setting("OPENAI_MAX_RETRIES", default="")
+    max_retries = _setting("OPENAI_MAX_RETRIES", "OPENAI_MAX_RETRIES", default="")
     if max_retries:
         client_kwargs["max_retries"] = int(max_retries)
     client = OpenAI(**client_kwargs)
