@@ -16,15 +16,17 @@ import os
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from ava_core.core import ChatMessage, ChatTrace, HttpEndpoint, OpenAIClient, Trace
+from ava_core.core import ChatMessage, ChatTrace, HttpEndpoint, OpenAIClient, Schema, Trace
 from ava_core.generate.core import GenerateFunction, Sample
 from ava_core.rewards.core import Reward, RewardFunction
-from ava_core.rollout import RolloutEngine, RolloutResult
-from ava_core.store.core import STORED
+from ava_core.rollout import RolloutEngine, RolloutError, RolloutResult
+from ava_core.store.postgres import PostgresBackend
+from ava_core.utils.io import write_jsonl
 from datasets import load_dataset
 
 from scicode.gen.models import extract_python_script
@@ -205,15 +207,22 @@ class SciCodeReward(RewardFunction[SciCodeReference]):
         )
 
 
-async def load_rows(split: str, problem_id: str | None, limit: int | None) -> list[dict[str, Any]]:
+async def load_rows(
+    split: str,
+    problem_ids: list[str] | None,
+    limit: int | None,
+) -> list[dict[str, Any]]:
     dataset = load_dataset("SciCode1/SciCode", split=split)
     rows = [dict(row) for row in dataset]
-    if problem_id is not None:
-        rows = [row for row in rows if str(row["problem_id"]) == problem_id]
+    if problem_ids:
+        selected = set(problem_ids)
+        rows = [row for row in rows if str(row["problem_id"]) in selected]
     return rows[:limit] if limit is not None else rows
 
 
 async def run(args: argparse.Namespace) -> None:
+    if not args.postgres:
+        raise SystemExit("Set POSTGRES or pass --postgres; AvaCore PostgreSQL is the primary trace store")
     rows = await load_rows(args.split, args.problem_id, args.limit)
     if not rows:
         raise SystemExit("No SciCode rows matched the requested selection")
@@ -223,19 +232,20 @@ async def run(args: argparse.Namespace) -> None:
         _endpoint_base_url(args.base_url),
         headers=HttpEndpoint.bearer(args.api_key),
     )
+    sampling_params = {
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+        **(
+            {"chat_template_kwargs": {"enable_thinking": False}}
+            if args.disable_thinking
+            else {}
+        ),
+    }
     model = OpenAIClient(
         endpoint,
         args.model,
         timeout=args.timeout,
-        sampling_params={
-            "temperature": args.temperature,
-            "max_tokens": args.max_tokens,
-            **(
-                {"chat_template_kwargs": {"enable_thinking": False}}
-                if args.disable_thinking
-                else {}
-            ),
-        },
+        sampling_params=sampling_params,
     )
     generate = SciCodeGenerate(
         model,
@@ -255,32 +265,88 @@ async def run(args: argparse.Namespace) -> None:
         )
         for row in rows
     ]
-    engine = RolloutEngine(generate, SciCodeReward(), concurrency=args.concurrency)
-    results: list[dict[str, Any]] = []
-    async with engine:
-        async for outcome in engine.run_pairs(pairs, stream_rollout=False):
-            if not isinstance(outcome, RolloutResult):
-                raise RuntimeError(f"SciCode rollout failed: {outcome.error}")
-            reward = outcome.reward
-            record = {
-                "query_id": outcome.instance["id"],
-                "status": outcome.status,
-                "trace": STORED.unstructure(outcome.trace),
-                "subtraces": [STORED.unstructure(item) for item in outcome.trace.subtraces],
-                "reward": STORED.unstructure(reward) if reward is not None else None,
-            }
-            results.append(record)
-    (output_dir / "rollouts.jsonl").write_text(
-        "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in results),
-        encoding="utf-8",
-    )
-    total_steps = sum(record["reward"]["metadata"]["total_steps"] for record in results)
-    total_correct = sum(record["reward"]["metadata"]["total_correct"] for record in results)
+    run_name = args.run_name or datetime.now(timezone.utc).strftime("scicode-%Y%m%dT%H%M%SZ")
+    backend = PostgresBackend(args.postgres)
+    results: list[RolloutResult] = []
+    errors = 0
+    async with backend:
+        async with backend.run(
+            kind="benchmark",
+            model=args.model,
+            run=run_name,
+            collection="scicode",
+            collection_version=1,
+            size=len(pairs),
+            trials=1,
+            sampling_params=sampling_params,
+            config={
+                "split": args.split,
+                "problem_ids": args.problem_id,
+                "with_background": args.with_background,
+                "h5py_file": str(Path(args.h5py_file).resolve()),
+            },
+            schema=Schema(preview="problem_id"),
+            resume=args.resume,
+        ) as stored_run:
+            await stored_run.update(status="running")
+            engine = RolloutEngine(generate, SciCodeReward(), concurrency=args.concurrency)
+            async with engine:
+                async for outcome in engine.run_pairs(pairs, stream_rollout=False):
+                    query_id = str(outcome.instance["id"])
+                    if isinstance(outcome, RolloutError):
+                        errors += 1
+                        await stored_run.create_errored_rollout(
+                            query_id=query_id,
+                            trial_id=0,
+                            instance=outcome.instance,
+                            error=outcome.error,
+                            status=outcome.status,
+                        )
+                    else:
+                        results.append(outcome)
+                        await stored_run.create_rollout(
+                            query_id=query_id,
+                            trial_id=0,
+                            instance=outcome.instance,
+                            trace=outcome.trace,
+                            reward=outcome.reward,
+                            status=outcome.status,
+                        )
+                        if outcome.reward is not None:
+                            await stored_run.score_group(query_id)
+                    await stored_run.update(
+                        status="running",
+                        score=sum(item.reward.score for item in results if item.reward is not None)
+                        / len(results)
+                        if results
+                        else 0.0,
+                        samples=len(results),
+                        successful_rollouts=len(results),
+                        errors=errors,
+                    )
+
+        export_path = Path(args.export or output_dir / "rollouts.jsonl").resolve()
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        await write_jsonl(
+            backend.export_rollouts(
+                model=args.model,
+                run=run_name,
+                collection="scicode",
+                collection_version=1,
+            ),
+            str(export_path),
+        )
+
+    rewards = [item.reward for item in results if item.reward is not None]
+    total_steps = sum(reward.metadata["total_steps"] for reward in rewards)
+    total_correct = sum(reward.metadata["total_correct"] for reward in rewards)
     print(json.dumps({
+        "run": run_name,
         "samples": len(results),
-        "problem_correctness": sum(record["reward"]["score"] for record in results) / len(results),
+        "errors": errors,
+        "problem_correctness": sum(reward.score for reward in rewards) / len(rewards) if rewards else 0.0,
         "subproblem_correctness": total_correct / total_steps if total_steps else 0.0,
-        "trace_file": str(output_dir / "rollouts.jsonl"),
+        "trace_file": str(export_path),
     }, ensure_ascii=False))
 
 
@@ -294,11 +360,15 @@ def main() -> None:
     parser.add_argument("--api-key", default=os.getenv("OPENAI_API_KEY", "dummy"))
     parser.add_argument("--model", default=os.getenv("MODEL", "Kimi-K3"))
     parser.add_argument("--split", default="test")
-    parser.add_argument("--problem-id")
+    parser.add_argument("--problem-id", action="append")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--h5py-file", required=True)
     parser.add_argument("--output", default="./avacore_runs")
+    parser.add_argument("--postgres", default=os.getenv("POSTGRES"))
+    parser.add_argument("--run-name")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--export", help="JSONL destination; exported from PostgreSQL after the run")
     parser.add_argument("--with-background", action="store_true")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=16384)
