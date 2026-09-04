@@ -122,14 +122,23 @@ def _run_kimi(
     env: dict[str, str],
     timeout: float,
 ) -> tuple[list[dict[str, Any]], str, int, str]:
-    process = subprocess.run(
-        [kimi, "-p", prompt, "--output-format", "stream-json"],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        process = subprocess.run(
+            [kimi, "-p", prompt, "--output-format", "stream-json"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        return [], "", 124, f"timed out after {timeout:.1f}s\n{stderr}"
     records: list[dict[str, Any]] = []
     for line in process.stdout.splitlines():
         try:
