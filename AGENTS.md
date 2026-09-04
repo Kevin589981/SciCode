@@ -320,6 +320,8 @@ OpenAI-compatible deployment with `OPENAI_BASE_URL` (or the corresponding
 must call `/v1/chat/completions` directly through the OpenAI client. Do not
 start the Kimi Code CLI, ACP server, shell agent, or any other tool-capable
 wrapper in strict mode. Kimi Code CLI is reserved for Agentic runs.
+For bounded provider calls, set `OPENAI_TIMEOUT` (seconds) and
+`OPENAI_MAX_RETRIES`; record timeout or cancellation as a private trace event.
 
 1. process subproblems in order;
 2. construct the official prompt from the fields the upstream template
