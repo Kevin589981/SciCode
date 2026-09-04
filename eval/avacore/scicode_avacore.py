@@ -22,9 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from ava_core.core import ChatMessage, ChatTrace, HttpEndpoint, OpenAIClient, Schema, Trace
+from ava_core.core.retry import HTTPRetry
 from ava_core.generate.core import GenerateFunction, Sample
 from ava_core.rewards.core import Reward, RewardFunction
 from ava_core.rollout import RolloutEngine, RolloutError, RolloutResult
+from ava_core.runner import RECOVERABLE_ERRORS
 from ava_core.store.postgres import PostgresBackend
 from ava_core.utils.io import write_jsonl
 from datasets import load_dataset
@@ -245,6 +247,7 @@ async def run(args: argparse.Namespace) -> None:
         endpoint,
         args.model,
         timeout=args.timeout,
+        retry=HTTPRetry(max_retries=args.http_retries),
         sampling_params=sampling_params,
     )
     generate = SciCodeGenerate(
@@ -289,7 +292,12 @@ async def run(args: argparse.Namespace) -> None:
             resume=args.resume,
         ) as stored_run:
             await stored_run.update(status="running")
-            engine = RolloutEngine(generate, SciCodeReward(), concurrency=args.concurrency)
+            engine = RolloutEngine(
+                generate,
+                SciCodeReward(),
+                concurrency=args.concurrency,
+                recoverable=RECOVERABLE_ERRORS,
+            )
             async with engine:
                 async for outcome in engine.run_pairs(pairs, stream_rollout=False):
                     query_id = str(outcome.instance["id"])
@@ -378,6 +386,12 @@ def main() -> None:
         help="Pass the common OpenAI-compatible no-thinking switch to the provider",
     )
     parser.add_argument("--timeout", type=float, default=7200.0)
+    parser.add_argument(
+        "--http-retries",
+        type=int,
+        default=5,
+        help="Retries for transient provider timeouts and connection errors",
+    )
     parser.add_argument("--concurrency", type=int, default=1)
     asyncio.run(run(parser.parse_args()))
 
