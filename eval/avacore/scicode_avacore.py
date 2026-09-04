@@ -33,6 +33,9 @@ from datasets import load_dataset
 
 from scicode.gen.models import extract_python_script
 
+_OFFICIAL_CWD = Path(__file__).parents[1] / "inspect_ai"
+_OFFICIAL_LOCK = asyncio.Lock()
+
 
 def _endpoint_base_url(base_url: str) -> str:
     """Convert an OpenAI-style base URL to the root expected by AvaCore."""
@@ -127,13 +130,19 @@ class SciCodeGenerate(GenerateFunction[Sample]):
         for index, step in enumerate(steps):
             # prepare_final_prompt_with_steps uses the original 1-based position.
             original_index = row["sub_steps"].index(step)
-            prompt, _ = assistant.prepare_final_prompt_with_steps(
-                prob_data=row,
-                num_steps=original_index + 1,
-                tot_steps=len(row["sub_steps"]),
-                prompt_template=prompt_template,
-                save=True,
-            )
+            async with _OFFICIAL_LOCK:
+                old_cwd = Path.cwd()
+                os.chdir(_OFFICIAL_CWD)
+                try:
+                    prompt, _ = assistant.prepare_final_prompt_with_steps(
+                        prob_data=row,
+                        num_steps=original_index + 1,
+                        tot_steps=len(row["sub_steps"]),
+                        prompt_template=prompt_template,
+                        save=True,
+                    )
+                finally:
+                    os.chdir(old_cwd)
             query = ChatTrace.from_messages(
                 (ChatMessage(role="user", content=prompt),)
             )
@@ -143,14 +152,20 @@ class SciCodeGenerate(GenerateFunction[Sample]):
                 **kwargs,
             )
             response = result.last_assistant().text_content
-            assistant.register_previous_response(
-                prob_data=row,
-                response=response,
-                previous_code=assistant.generate_prompt_with_steps(
-                    row, original_index + 1, prompt_template
-                )[1],
-                num_steps=original_index + 1,
-            )
+            async with _OFFICIAL_LOCK:
+                old_cwd = Path.cwd()
+                os.chdir(_OFFICIAL_CWD)
+                try:
+                    assistant.register_previous_response(
+                        prob_data=row,
+                        response=response,
+                        previous_code=assistant.generate_prompt_with_steps(
+                            row, original_index + 1, prompt_template
+                        )[1],
+                        num_steps=original_index + 1,
+                    )
+                finally:
+                    os.chdir(old_cwd)
             subtraces.append(result)
         return ChatTrace.from_messages(()).as_root_of(subtraces)
 
