@@ -95,8 +95,9 @@ class SciCodeGenerate(GenerateFunction[Sample]):
         **kwargs: Any,
     ) -> Trace:
         row = dict(instance)
-        prompt_root = self.output_dir / "prompts" / str(row["problem_id"])
-        code_root = self.output_dir / "generated_code" / str(row["problem_id"])
+        problem_root = self.output_dir / str(row["problem_id"])
+        prompt_root = problem_root / "prompts"
+        code_root = problem_root / "generated_code"
         official = _official_adapter()
         assistant = official.ScicodePromptingAssistant(
             output_dir=code_root,

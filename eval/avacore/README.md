@@ -34,3 +34,13 @@ and the official aggregate fields `total_correct` and `total_steps` in
 `reward.metadata`. AvaCore's PostgreSQL store can be added around the same
 `RolloutEngine` call when a database DSN is available; JSONL mode is useful for
 local reproduction and trace inspection without changing the benchmark logic.
+
+Per-problem working files use the same background-mode directory expected by
+the official evaluator:
+
+```text
+<output>/<problem_id>/
+  prompts/<with_background|without_background>/
+  generated_code/<with_background|without_background>/<step_id>.py
+  logs/evaluation_logs/<with_background|without_background>/<step_id>.log
+```
