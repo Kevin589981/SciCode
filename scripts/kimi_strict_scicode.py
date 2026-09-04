@@ -64,6 +64,7 @@ def main() -> int:
     problem = _load_problem(args.problem)
     total_steps = len(problem["sub_steps"])
     steps_to_run = total_steps if args.max_steps <= 0 else min(args.max_steps, total_steps)
+    is_openai_compatible = args.model.startswith("openai/") or "gpt" in args.model
 
     # The upstream adapter reads these names from keys.cfg when present and
     # from the environment otherwise. No Kimi Code CLI process is involved.
@@ -76,7 +77,7 @@ def main() -> int:
         candidate_id=f"strict-{problem['problem_id']}",
         task_revision="r1",
         mode="strict",
-        provider="openai-compatible",
+        provider="openai-compatible" if is_openai_compatible else args.model,
         model=args.model.removeprefix("openai/"),
         sampling={"temperature": args.temperature, "stream": False},
         prompt_version="scicode-upstream-v1",
@@ -110,7 +111,7 @@ def main() -> int:
                 {
                     "status": "ok",
                     "mode": "strict",
-                    "api": "direct_openai_compatible",
+                    "api": "direct_openai_compatible" if is_openai_compatible else args.model,
                     "model": args.model.removeprefix("openai/"),
                     "problem_id": problem["problem_id"],
                     "steps_completed": steps_to_run,
