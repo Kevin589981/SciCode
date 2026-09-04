@@ -14,12 +14,14 @@ BACKGOUND_PROMPT_TEMPLATE = Path("eval", "data", "multistep_template.txt").read_
 
 class Gencode:
     def __init__(self, model: str, output_dir: Path,
-                 prompt_dir: Path, with_background: bool, temperature: float):
+                 prompt_dir: Path, with_background: bool, temperature: float,
+                 trace_recorder=None):
         self.model = model
         self.output_dir = output_dir
         self.prompt_dir = prompt_dir
         self.with_background = with_background
         self.temperature = temperature
+        self.trace_recorder = trace_recorder
         self.previous_llm_code = []
 
     def _get_background_dir(self):
@@ -90,15 +92,49 @@ class Gencode:
         if save:
             self.save_prompt_with_steps(prob_data, prompt, num_steps)
 
+        step_id = str(prob_data["sub_steps"][num_steps - 1]["step_number"])
+        if self.trace_recorder is not None:
+            self.trace_recorder.record("prompt", {"text": prompt}, step_id=step_id)
+
         model_kwargs = {}
         if "claude" in model:
             model_kwargs["max_tokens"] = 4096
         model_kwargs["temperature"] = self.temperature
+        if self.trace_recorder is not None and (
+            model.startswith("openai/") or "gpt" in model
+        ):
+            model_kwargs["trace_callback"] = self._record_provider_event
         # write the response to a file if it doesn't exist
         model_fct = get_model_function(model, **model_kwargs)
         response_from_llm = model_fct(prompt)
         self.previous_llm_code[num_steps - 1] = extract_python_script(response_from_llm)
         self.save_response_with_steps(prob_data, response_from_llm, previous_code, num_steps)
+        if self.trace_recorder is not None:
+            self.trace_recorder.record(
+                "assistant_message", {"text": response_from_llm}, step_id=step_id
+            )
+            self.trace_recorder.record(
+                "code_snapshot",
+                {"chars": len(self.previous_llm_code[num_steps - 1])},
+                step_id=step_id,
+            )
+            self.trace_recorder.record(
+                "step_result",
+                {"status": "generated"},
+                step_id=step_id,
+            )
+        return response_from_llm
+
+    def _record_provider_event(self, completion) -> None:
+        if self.trace_recorder is None:
+            return
+        if hasattr(completion, "model_dump"):
+            event = completion.model_dump(mode="json")
+        elif hasattr(completion, "dict"):
+            event = completion.dict()
+        else:
+            event = {"response": str(completion)}
+        self.trace_recorder.record_raw(event)
 
     @staticmethod
     def process_problem_code(prob_data: dict, num_steps: int) -> str:

@@ -313,6 +313,14 @@ scientific verifier. They differ only in interaction and feedback.
 Execute the original SciCode interaction as a single sequential generation
 chain. Strict is not an agentic debugging mode:
 
+The strict runner MUST reuse the upstream `eval/scripts/gencode.py` workflow
+and its `src/scicode/gen/models.py` provider adapter. Configure a custom
+OpenAI-compatible deployment with `OPENAI_BASE_URL` (or the corresponding
+`keys.cfg` entry) and select it as `openai/<provider-model-id>`. The adapter
+must call `/v1/chat/completions` directly through the OpenAI client. Do not
+start the Kimi Code CLI, ACP server, shell agent, or any other tool-capable
+wrapper in strict mode. Kimi Code CLI is reserved for Agentic runs.
+
 1. process subproblems in order;
 2. construct the official prompt from the fields the upstream template
    actually renders: prior subproblem descriptions (and their optional

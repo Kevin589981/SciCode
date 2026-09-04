@@ -10,6 +10,17 @@ ANTHROPIC_KEY = 'your_api_key'
 GOOGLE_KEY = 'your_api_key' 
 ```
 
+For an OpenAI-compatible deployment, add `OPENAI_BASE_URL` (a base URL such
+as `http://host:port/v1` or the full `/chat/completions` URL) and select the
+provider model with the `openai/` prefix. The upstream sequential generator
+then calls the Chat Completions API directly; it does not start an agent CLI:
+
+```
+OPENAI_KEY = 'your_api_key'
+OPENAI_BASE_URL = 'http://host:port/v1'
+python scripts/kimi_strict_scicode.py --model openai/Kimi-K3
+```
+
 If you're using **litellm**, which supports a variety of providers including **vllm**, **Hugging Face**, and **Together AI**, make sure to include the relevant API key in the `keys.cfg` file. Please refer to the docs [here](https://docs.litellm.ai/docs/providers). Then, use `litellm/*` as the model name when running the command.
 
 For example, to use **Together AI**'s models, you'll need to add the following to your `keys.cfg`:

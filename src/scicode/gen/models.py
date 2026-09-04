@@ -5,8 +5,6 @@ import google.generativeai as genai
 import config
 import re
 import os
-import litellm
-from litellm.utils import validate_environment as litellm_validate_environment
 
 from scicode import keys_cfg_path
 from scicode.utils.log import get_logger
@@ -19,8 +17,35 @@ def get_config():
         raise FileNotFoundError(f"Config file not found: {keys_cfg_path}")
     return config.Config(str(keys_cfg_path))
 
+
+def _setting(name: str, *environment_names: str, default: str = "") -> str:
+    """Read a setting from ``keys.cfg`` with environment fallbacks."""
+
+    if keys_cfg_path.exists():
+        configured = get_config().as_dict().get(name)
+        if configured is not None and str(configured).strip():
+            return str(configured).strip()
+    for environment_name in environment_names:
+        value = os.environ.get(environment_name)
+        if value and value.strip():
+            return value.strip()
+    return default
+
+
+def _openai_base_url(value: str) -> str | None:
+    """Normalize either an API base URL or a full chat-completions URL."""
+
+    value = value.rstrip("/")
+    suffix = "/chat/completions"
+    if value.endswith(suffix):
+        value = value[: -len(suffix)]
+    return value or None
+
 def generate_litellm_response(prompt: str, *, model: str, **kwargs) -> str:
     """Call the litellm api to generate a response"""
+    import litellm
+    from litellm.utils import validate_environment as litellm_validate_environment
+
     # litellm expects all keys as env variables
     config = get_config()
     for key, value in config.as_dict().items():
@@ -42,11 +67,28 @@ def generate_litellm_response(prompt: str, *, model: str, **kwargs) -> str:
     )
     return response.choices[0].message.content
 
-def generate_openai_response(prompt: str, *, model="gpt-4-turbo-2024-04-09",
-                             temperature: float = 0) -> str:
-    """call the openai api to generate a response"""
-    key: str = get_config()["OPENAI_KEY"]  # type: ignore
-    client = OpenAI(api_key=key)
+def generate_openai_response(
+    prompt: str,
+    *,
+    model="gpt-4-turbo-2024-04-09",
+    temperature: float = 0,
+    trace_callback=None,
+) -> str:
+    """Call an OpenAI Chat Completions-compatible endpoint.
+
+    ``OPENAI_BASE_URL`` may be a base URL (``.../v1``) or the full
+    ``.../chat/completions`` URL.  ``trace_callback`` receives the provider
+    response object when a caller needs a provider-native audit record.
+    """
+
+    key = _setting("OPENAI_KEY", "OPENAI_API_KEY", default="dummy")
+    base_url = _openai_base_url(
+        _setting("OPENAI_BASE_URL", "OPENAI_API_BASE", default="")
+    )
+    client_kwargs = {"api_key": key}
+    if base_url is not None:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
     completion = client.chat.completions.create(
         model=model,
         temperature=temperature,
@@ -55,6 +97,8 @@ def generate_openai_response(prompt: str, *, model="gpt-4-turbo-2024-04-09",
             {"role": "user", "content": prompt},
         ],
     )
+    if trace_callback is not None:
+        trace_callback(completion)
     return completion.choices[0].message.content
 
 
@@ -119,6 +163,9 @@ def get_model_function(model: str, **kwargs):
     if model.startswith("litellm/"):
         model = model.removeprefix("litellm/")
         fct = generate_litellm_response
+    elif model.startswith("openai/"):
+        model = model.removeprefix("openai/")
+        fct = generate_openai_response
     elif "gpt" in model:
         fct = generate_openai_response
     elif "claude" in model:
