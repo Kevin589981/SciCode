@@ -16,6 +16,7 @@ import os
 import sys
 import tempfile
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from datasets import load_dataset
 
 from scicode.gen.models import extract_python_script
 
+@lru_cache(maxsize=1)
 def _official_adapter():
     path = Path(__file__).parents[1] / "inspect_ai" / "scicode.py"
     spec = importlib.util.spec_from_file_location("scicode_official_adapter", path)
