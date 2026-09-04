@@ -25,6 +25,11 @@ cd /root/scicode-avacore/SciCode/eval/avacore
   --concurrency 1
 ```
 
+`BASE_URL`, `OPENAI_API_KEY`, and `MODEL` are also read from the environment.
+Both `https://host` and the usual OpenAI-style `https://host/v1` are accepted
+as `BASE_URL`; the adapter normalizes the latter before AvaCore appends its API
+path.
+
 Use `--problem-id 2` for the one-step smoke case. `--max-steps` is only for
 prompt/trace debugging and intentionally does not claim an official score,
 because the upstream evaluator requires all subproblem files for a problem.

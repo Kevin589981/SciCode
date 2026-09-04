@@ -29,6 +29,13 @@ from datasets import load_dataset
 
 from scicode.gen.models import extract_python_script
 
+
+def _endpoint_base_url(base_url: str) -> str:
+    """Convert an OpenAI-style base URL to the root expected by AvaCore."""
+    normalized = base_url.rstrip("/")
+    return normalized[:-3] if normalized.endswith("/v1") else normalized
+
+
 @lru_cache(maxsize=1)
 def _official_adapter():
     path = Path(__file__).parents[1] / "inspect_ai" / "scicode.py"
@@ -212,7 +219,10 @@ async def run(args: argparse.Namespace) -> None:
         raise SystemExit("No SciCode rows matched the requested selection")
     output_dir = Path(args.output).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    endpoint = HttpEndpoint.from_url(args.base_url, headers=HttpEndpoint.bearer(args.api_key))
+    endpoint = HttpEndpoint.from_url(
+        _endpoint_base_url(args.base_url),
+        headers=HttpEndpoint.bearer(args.api_key),
+    )
     model = OpenAIClient(
         endpoint,
         args.model,
@@ -276,9 +286,13 @@ async def run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--api-key", default="dummy")
-    parser.add_argument("--model", default="Kimi-K3")
+    parser.add_argument(
+        "--base-url",
+        default=os.getenv("BASE_URL", "http://localhost:8000"),
+        help="OpenAI-compatible root URL; a trailing /v1 is accepted",
+    )
+    parser.add_argument("--api-key", default=os.getenv("OPENAI_API_KEY", "dummy"))
+    parser.add_argument("--model", default=os.getenv("MODEL", "Kimi-K3"))
     parser.add_argument("--split", default="test")
     parser.add_argument("--problem-id")
     parser.add_argument("--limit", type=int)
