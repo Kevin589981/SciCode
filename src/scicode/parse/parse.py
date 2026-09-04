@@ -4,12 +4,6 @@ import ast
 import json
 import re
 
-import h5py
-import scipy
-import numpy as np
-from sympy import Symbol
-from datasets import load_dataset
-
 OrderedContent = list[tuple[str, str]]
 
 H5PY_FILE = "eval/data/test_data.h5"
@@ -58,6 +52,8 @@ def read_from_jsonl(file_path):
     return data
 
 def read_from_hf_dataset(split='validation'):
+    from datasets import load_dataset
+
     dataset = load_dataset('SciCode1/SciCode', split=split)
     return dataset
 
@@ -80,6 +76,8 @@ def process_hdf5_list(group):
 
 
 def process_hdf5_dict(group):
+    import h5py
+
     dict = {}
     for key, obj in group.items():
         if isinstance(obj, h5py.Group):
@@ -96,6 +94,8 @@ def process_hdf5_dict(group):
 
 
 def process_hdf5_sparse_matrix(group):
+    import scipy.sparse
+
     data = group['data'][()]
     shape = tuple(group['shape'][()])
     if 'row' in group and 'col' in group:
@@ -124,6 +124,8 @@ def process_hdf5_datagroup(group):
 
 
 def process_hdf5_to_tuple(step_id, test_num, h5py_file=H5PY_FILE):
+    import h5py
+
     data_lst = []
     with h5py.File(h5py_file, 'r') as f:
         for test_id in range(test_num):
@@ -158,6 +160,9 @@ def process_hdf5_to_tuple(step_id, test_num, h5py_file=H5PY_FILE):
 
 
 def save_data_to_hdf5(key, value, h5file):
+    import numpy as np
+    import scipy.sparse
+
     if isinstance(value, dict):
         subgroup = h5file.create_group(key)
         save_dict_to_hdf5(value, subgroup)
@@ -194,6 +199,10 @@ def save_data_to_hdf5(key, value, h5file):
 
 
 def save_dict_to_hdf5(data_dict, h5file):
+    import numpy as np
+    import scipy.sparse
+    from sympy import Symbol
+
     for key, value in data_dict.items():
         if isinstance(key, (Symbol, np.float_)):
             key = str(key)

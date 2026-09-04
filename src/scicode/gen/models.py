@@ -1,8 +1,5 @@
 from functools import partial
 from openai import OpenAI
-import anthropic
-import google.generativeai as genai
-import config
 import re
 import os
 
@@ -15,6 +12,8 @@ logger = get_logger("models")
 def get_config():
     if not keys_cfg_path.exists():
         raise FileNotFoundError(f"Config file not found: {keys_cfg_path}")
+    import config
+
     return config.Config(str(keys_cfg_path))
 
 
@@ -105,6 +104,8 @@ def generate_openai_response(
 def generate_anthropic_response(prompt, *, model="claude-3-opus-20240229",
                                 max_tokens: int = 4096, temperature: float = 0) -> str:
     """call the anthropic api to generate a response"""
+    import anthropic
+
     key: str = get_config()["ANTHROPIC_KEY"]  # type: ignore
     client = anthropic.Anthropic(api_key=key)
     message = client.messages.create(
@@ -121,6 +122,8 @@ def generate_anthropic_response(prompt, *, model="claude-3-opus-20240229",
 def generate_google_response(prompt: str, *, model: str = "gemini-pro",
                              temperature: float = 0) -> str:
     """call the api to generate a response"""
+    import google.generativeai as genai
+
     key: str = get_config()["GOOGLE_KEY"]  # type: ignore
     genai.configure(api_key=key)
     model = genai.GenerativeModel(model_name=model)
