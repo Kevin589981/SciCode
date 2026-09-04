@@ -16,6 +16,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Make the repository root importable when this file is executed directly.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from eval.scripts.gencode import BACKGOUND_PROMPT_TEMPLATE, DEFAULT_PROMPT_TEMPLATE, Gencode
 from scicode.parse.parse import read_from_jsonl
 from scicode.trace import TraceRecorder
@@ -25,12 +30,11 @@ DEFAULT_BASE_URL = "http://117.135.59.14:5050/v1"
 
 
 def _parser() -> argparse.ArgumentParser:
-    repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--problem",
         type=Path,
-        default=repo_root / "tests/test_data/first_problem.jsonl",
+        default=REPO_ROOT / "tests/test_data/first_problem.jsonl",
         help="One-line SciCode JSONL record",
     )
     parser.add_argument("--model", default="openai/Kimi-K3")
@@ -39,8 +43,8 @@ def _parser() -> argparse.ArgumentParser:
         "--api-key",
         default=os.environ.get("OPENAI_API_KEY", os.environ.get("OPENAI_KEY", "dummy")),
     )
-    parser.add_argument("--output-dir", type=Path, default=repo_root / "runs/kimi-strict-api")
-    parser.add_argument("--prompt-dir", type=Path, default=repo_root / "runs/kimi-strict-api-prompts")
+    parser.add_argument("--output-dir", type=Path, default=REPO_ROOT / "runs/kimi-strict-api")
+    parser.add_argument("--prompt-dir", type=Path, default=REPO_ROOT / "runs/kimi-strict-api-prompts")
     parser.add_argument("--run-id", default="kimi-strict-api-001")
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--temperature", type=float, default=0.0)
