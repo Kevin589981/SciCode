@@ -278,6 +278,9 @@ class SciCodeReward(RewardFunction[SciCodeReference]):
 
     reference_type = SciCodeReference
 
+    def __init__(self, *, score_by_subproblem: bool = False) -> None:
+        self.score_by_subproblem = score_by_subproblem
+
     async def evaluate(self, trace: Trace, reference: SciCodeReference) -> Reward:
         output_dir = Path(reference.output_dir)
         model_dir = output_dir / "generated_code" / (
@@ -309,8 +312,10 @@ class SciCodeReward(RewardFunction[SciCodeReference]):
             finally:
                 os.chdir(old_cwd)
                 os.environ["PATH"] = old_path
+        subproblem_score = float(total_correct / total_steps if total_steps else 0.0)
+        primary_score = subproblem_score if self.score_by_subproblem else float(problem_correct)
         return Reward(
-            score=float(problem_correct),
+            score=primary_score,
             reason="SciCode official evaluator",
             components={
                 "problem_correctness": Reward(score=float(problem_correct)),
@@ -323,6 +328,9 @@ class SciCodeReward(RewardFunction[SciCodeReference]):
                 "total_correct": total_correct,
                 "total_steps": total_steps,
                 "problem_correct": problem_correct,
+                "problem_correctness": float(problem_correct),
+                "subproblem_correctness": subproblem_score,
+                "score_metric": "subproblem_correctness" if self.score_by_subproblem else "problem_correctness",
                 "usage": trace.metadata.get("usage", {}),
             },
         )
@@ -339,6 +347,17 @@ async def load_rows(
         selected = set(problem_ids)
         rows = [row for row in rows if str(row["problem_id"]) in selected]
     return rows[:limit] if limit is not None else rows
+
+
+def _aggregate_run_score(results: list[RolloutResult], *, score_by_subproblem: bool) -> float:
+    rewards = [item.reward for item in results if item.reward is not None]
+    if not rewards:
+        return 0.0
+    if score_by_subproblem:
+        total_correct = sum(reward.metadata.get("total_correct", 0) for reward in rewards)
+        total_steps = sum(reward.metadata.get("total_steps", 0) for reward in rewards)
+        return total_correct / total_steps if total_steps else 0.0
+    return sum(reward.score for reward in rewards) / len(rewards)
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -410,6 +429,7 @@ async def run(args: argparse.Namespace) -> None:
                 "split": args.split,
                 "problem_ids": args.problem_id,
                 "with_background": args.with_background,
+                "score_metric": "subproblem_correctness" if args.score_by_subproblem else "problem_correctness",
                 "h5py_file": str(Path(args.h5py_file).resolve()),
             },
             schema=Schema(preview="problem_id"),
@@ -418,7 +438,7 @@ async def run(args: argparse.Namespace) -> None:
             await stored_run.update(status="running")
             engine = RolloutEngine(
                 generate,
-                SciCodeReward(),
+                SciCodeReward(score_by_subproblem=args.score_by_subproblem),
                 concurrency=args.concurrency,
                 recoverable=RECOVERABLE_ERRORS,
             )
@@ -448,10 +468,10 @@ async def run(args: argparse.Namespace) -> None:
                             await stored_run.score_group(query_id)
                     await stored_run.update(
                         status="running",
-                        score=sum(item.reward.score for item in results if item.reward is not None)
-                        / len(results)
-                        if results
-                        else 0.0,
+                        score=_aggregate_run_score(
+                            results,
+                            score_by_subproblem=args.score_by_subproblem,
+                        ),
                         samples=len(results),
                         successful_rollouts=len(results),
                         errors=errors,
@@ -472,12 +492,23 @@ async def run(args: argparse.Namespace) -> None:
     rewards = [item.reward for item in results if item.reward is not None]
     total_steps = sum(reward.metadata["total_steps"] for reward in rewards)
     total_correct = sum(reward.metadata["total_correct"] for reward in rewards)
+    problem_correctness = (
+        sum(reward.metadata.get("problem_correctness", reward.score) for reward in rewards)
+        / len(rewards)
+        if rewards
+        else 0.0
+    )
     print(json.dumps({
         "run": run_name,
         "samples": len(results),
         "errors": errors,
-        "problem_correctness": sum(reward.score for reward in rewards) / len(rewards) if rewards else 0.0,
+        "problem_correctness": problem_correctness,
         "subproblem_correctness": total_correct / total_steps if total_steps else 0.0,
+        "score_metric": "subproblem_correctness" if args.score_by_subproblem else "problem_correctness",
+        "score": _aggregate_run_score(
+            results,
+            score_by_subproblem=args.score_by_subproblem,
+        ),
         "trace_file": str(export_path),
     }, ensure_ascii=False))
 
@@ -502,6 +533,11 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--export", help="JSONL destination; exported from PostgreSQL after the run")
     parser.add_argument("--with-background", action="store_true")
+    parser.add_argument(
+        "--score-by-subproblem",
+        action="store_true",
+        help="Use the weighted subproblem pass rate as the AvaCore run score",
+    )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument(
