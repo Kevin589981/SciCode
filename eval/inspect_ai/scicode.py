@@ -14,6 +14,14 @@ from scicode.gen.models import generate_dummy_response, extract_python_script
 BACKGOUND_PROMPT_TEMPLATE = Path("../data", "multistep_template.txt").read_text()
 DEFAULT_PROMPT_TEMPLATE = Path("../data", "background_comment_template.txt").read_text()
 
+# These released records are intentionally excluded from the official
+# aggregate. Keep the rule shared by prompt generation and scoring.
+SKIPPED_SUBSTEPS = frozenset({("13", 5), ("62", 0), ("76", 2)})
+
+
+def is_skipped_substep(problem_id: str, index: int) -> bool:
+    return (str(problem_id), index) in SKIPPED_SUBSTEPS
+
 class ScicodePromptingAssistant:
     def __init__(
         self,
@@ -144,11 +152,7 @@ class ScicodePromptingAssistant:
                 self.previous_llm_code = [None] * tot_steps
             for prev_step in range(num_steps - 1):
                 if self.previous_llm_code[prev_step] is None:
-                    if (
-                        (prob_id == "13" and prev_step == 5) or 
-                        (prob_id == "62" and prev_step == 0) or 
-                        (prob_id == "76" and prev_step == 2)
-                    ):
+                    if is_skipped_substep(prob_id, prev_step):
                         prev_file_path = Path(
                             "../data",
                             f"{prob_id}.{prev_step+1}.txt"
@@ -215,11 +219,7 @@ class ScicodeEvaluator:
         sub_steps = prob_data["sub_steps"]
         problem_id = prob_data["problem_id"]
         for idx in range(len(sub_steps)):
-            if (
-                (problem_id == "13" and idx == 5) or
-                (problem_id == "62" and idx == 0) or
-                (problem_id == "76" and idx == 2)
-            ):
+            if is_skipped_substep(problem_id, idx):
                 continue
             step_id = sub_steps[idx]["step_number"]
             code_file_path = Path(code_dir, f"{step_id}.py")
@@ -250,14 +250,13 @@ from scicode.parse.parse import process_hdf5_to_tuple
             except subprocess.TimeoutExpired:
                 return 2
             
-        total_steps = len(sub_steps)
+        total_steps = sum(
+            not is_skipped_substep(problem_id, idx)
+            for idx in range(len(sub_steps))
+        )
         total_correct = 0
         for idx in range(len(sub_steps)):
-            if (
-                (problem_id == "13" and idx == 5) or
-                (problem_id == "62" and idx == 0) or
-                (problem_id == "76" and idx == 2)
-            ):
+            if is_skipped_substep(problem_id, idx):
                 continue
             step_id = sub_steps[idx]["step_number"]
             script_path = Path(tmp_dir, f'{step_id}.py')

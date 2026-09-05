@@ -15,11 +15,11 @@ import json
 import os
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from ava_core.core import ChatMessage, ChatTrace, HttpEndpoint, OpenAIClient, Schema, Trace
 from ava_core.core.retry import HTTPRetry
@@ -41,6 +41,108 @@ def _endpoint_base_url(base_url: str) -> str:
     """Convert an OpenAI-style base URL to the root expected by AvaCore."""
     normalized = base_url.rstrip("/")
     return normalized[:-3] if normalized.endswith("/v1") else normalized
+
+
+def _normalize_usage(raw: Any) -> dict[str, int]:
+    """Normalize provider usage fields without losing reasoning-token counts."""
+    if not isinstance(raw, Mapping):
+        return {}
+
+    usage: dict[str, int] = {}
+    aliases = {
+        "prompt_tokens": ("prompt_tokens", "input_tokens"),
+        "completion_tokens": ("completion_tokens", "output_tokens"),
+        "total_tokens": ("total_tokens",),
+    }
+    for target, keys in aliases.items():
+        for key in keys:
+            value = raw.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                usage[target] = int(value)
+                break
+
+    reasoning = raw.get("reasoning_tokens")
+    if not isinstance(reasoning, (int, float)) or isinstance(reasoning, bool):
+        details = raw.get("completion_tokens_details")
+        if isinstance(details, Mapping):
+            reasoning = details.get("reasoning_tokens")
+    if isinstance(reasoning, (int, float)) and not isinstance(reasoning, bool):
+        usage["reasoning_tokens"] = int(reasoning)
+
+    prompt_details = raw.get("prompt_tokens_details")
+    if isinstance(prompt_details, Mapping):
+        cached = prompt_details.get("cached_tokens")
+        if isinstance(cached, (int, float)) and not isinstance(cached, bool):
+            usage["cached_tokens"] = int(cached)
+
+    if "total_tokens" not in usage:
+        prompt = usage.get("prompt_tokens")
+        completion = usage.get("completion_tokens")
+        if prompt is not None and completion is not None:
+            usage["total_tokens"] = prompt + completion
+    return usage
+
+
+def _aggregate_usage(steps: list[dict[str, Any]], traces: list[ChatTrace]) -> dict[str, Any]:
+    """Return run-level and per-subproblem token accounting for AvaCore."""
+    totals = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "total_tokens": 0,
+    }
+    by_step: list[dict[str, Any]] = []
+    steps_with_usage = 0
+    for step, trace in zip(steps, traces):
+        raw = trace.last_assistant().metadata.get("usage")
+        usage = _normalize_usage(raw)
+        if usage:
+            steps_with_usage += 1
+            for key in totals:
+                totals[key] += usage.get(key, 0)
+        by_step.append({"step_number": step["step_number"], "usage": usage})
+    return {
+        "available": steps_with_usage > 0,
+        "steps": len(traces),
+        "steps_with_usage": steps_with_usage,
+        **totals,
+        "by_step": by_step,
+    }
+
+
+class TraceOpenAIClient(OpenAIClient):
+    """OpenAI client that retains provider usage in each assistant message.
+
+    AvaCore's stock client currently keeps only ``finish_reason`` for chat
+    completions. SciCode needs the provider usage for auditable trace export,
+    so this adapter preserves the response's usage and identity fields.
+    """
+
+    async def step(self, trace: Trace, *, sampling_params: dict[str, Any] = {}, **kwargs: Any) -> Trace:
+        payload = {
+            "model": self.name,
+            "messages": [message.to_dict() for message in trace.messages],
+            **({"tools": [tool.to_dict() for tool in trace.tools]} if trace.tools else {}),
+            **self.sampling_params,
+            **sampling_params,
+            **kwargs,
+        }
+        response = await self.request("/v1/chat/completions", payload, self.headers())
+        choice = response["choices"][0]
+        assistant = ChatMessage.from_dict(choice["message"])
+        metadata = {
+            "finish_reason": choice.get("finish_reason"),
+            **{
+                key: response[key]
+                for key in ("id", "model", "system_fingerprint")
+                if key in response
+            },
+        }
+        if response.get("usage") is not None:
+            metadata["usage"] = response["usage"]
+        assistant = replace(assistant, metadata=metadata)
+        return trace.extend(messages=(assistant,), query=trace, is_generated=True)
 
 
 @lru_cache(maxsize=1)
@@ -167,7 +269,8 @@ class SciCodeGenerate(GenerateFunction[Sample]):
                 finally:
                     os.chdir(old_cwd)
             subtraces.append(result)
-        return ChatTrace.from_messages(()).as_root_of(subtraces)
+        root = ChatTrace.from_messages(()).as_root_of(subtraces)
+        return replace(root, metadata={"usage": _aggregate_usage(steps, subtraces)})
 
 
 class SciCodeReward(RewardFunction[SciCodeReference]):
@@ -220,6 +323,7 @@ class SciCodeReward(RewardFunction[SciCodeReference]):
                 "total_correct": total_correct,
                 "total_steps": total_steps,
                 "problem_correct": problem_correct,
+                "usage": trace.metadata.get("usage", {}),
             },
         )
 
@@ -263,7 +367,7 @@ async def run(args: argparse.Namespace) -> None:
             else {}
         ),
     }
-    model = OpenAIClient(
+    model = TraceOpenAIClient(
         endpoint,
         args.model,
         timeout=args.timeout,
@@ -403,7 +507,7 @@ def main() -> None:
     parser.add_argument(
         "--reasoning-effort",
         default=os.getenv("REASONING_EFFORT"),
-        help="Provider reasoning effort, for example low, high, or max",
+        help="Provider reasoning effort, for example low, medium, high, xhigh, or max",
     )
     parser.add_argument(
         "--disable-thinking",
