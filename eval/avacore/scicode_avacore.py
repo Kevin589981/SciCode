@@ -253,6 +253,11 @@ async def run(args: argparse.Namespace) -> None:
         "temperature": args.temperature,
         "max_tokens": args.max_tokens,
         **(
+            {"reasoning_effort": args.reasoning_effort}
+            if args.reasoning_effort
+            else {}
+        ),
+        **(
             {"chat_template_kwargs": {"enable_thinking": False}}
             if args.disable_thinking
             else {}
@@ -395,6 +400,11 @@ def main() -> None:
     parser.add_argument("--with-background", action="store_true")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument(
+        "--reasoning-effort",
+        default=os.getenv("REASONING_EFFORT"),
+        help="Provider reasoning effort, for example low, high, or max",
+    )
     parser.add_argument(
         "--disable-thinking",
         action="store_true",
