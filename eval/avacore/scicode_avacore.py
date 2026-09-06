@@ -31,8 +31,6 @@ from ava_core.store.postgres import PostgresBackend
 from ava_core.utils.io import write_jsonl
 from datasets import load_dataset
 
-from scicode.gen.models import extract_python_script
-
 _OFFICIAL_CWD = Path(__file__).parents[1] / "inspect_ai"
 _OFFICIAL_LOCK = asyncio.Lock()
 
@@ -197,11 +195,13 @@ class SciCodeGenerate(GenerateFunction[Sample]):
         with_background: bool,
         output_dir: Path,
         max_steps: int | None = None,
+        request_sampling_params: Mapping[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.with_background = with_background
         self.output_dir = output_dir
         self.max_steps = max_steps
+        self.request_sampling_params = dict(request_sampling_params or {})
 
     async def __call__(
         self,
@@ -270,7 +270,15 @@ class SciCodeGenerate(GenerateFunction[Sample]):
                     os.chdir(old_cwd)
             subtraces.append(result)
         root = ChatTrace.from_messages(()).as_root_of(subtraces)
-        return replace(root, metadata={"usage": _aggregate_usage(steps, subtraces)})
+        return replace(
+            root,
+            metadata={
+                "usage": _aggregate_usage(steps, subtraces),
+                # Keep the exact provider request settings alongside the JSONL
+                # trace so a score can be reproduced from the exported artifact.
+                "sampling_params": dict(self.request_sampling_params),
+            },
+        )
 
 
 class SciCodeReward(RewardFunction[SciCodeReference]):
@@ -288,12 +296,46 @@ class SciCodeReward(RewardFunction[SciCodeReference]):
         )
         model_dir.mkdir(parents=True, exist_ok=True)
         subtraces = trace.subtraces or [trace]
-        for step, subtrace in zip(_active_steps(reference.row), subtraces):
-            code = extract_python_script(subtrace.last_assistant().text_content)
-            (model_dir / f"{step['step_number']}.py").write_text(
-                f"{reference.row['required_dependencies']}\n{code}\n",
-                encoding="utf-8",
-            )
+        # Re-run the upstream file-writing protocol from the trace.  The
+        # official solver stores each response together with all previous
+        # functions; the evaluator executes that cumulative file for every
+        # subproblem.  Replaying the upstream assistant here also handles the
+        # three released/skipped substeps exactly as the original code does.
+        official = _official_adapter()
+        assistant = official.ScicodePromptingAssistant(
+            output_dir=output_dir / "generated_code",
+            prompt_dir=output_dir / "prompts",
+            with_background=reference.with_background,
+        )
+        prompt_template = (
+            official.BACKGOUND_PROMPT_TEMPLATE
+            if reference.with_background
+            else official.DEFAULT_PROMPT_TEMPLATE
+        )
+        active_steps = _active_steps(reference.row)
+        for step, subtrace in zip(active_steps, subtraces):
+            # Keep the original index because skipped substeps still occupy a
+            # position in the upstream problem record.
+            original_index = reference.row["sub_steps"].index(step)
+            async with _OFFICIAL_LOCK:
+                old_cwd = Path.cwd()
+                os.chdir(_OFFICIAL_CWD)
+                try:
+                    _, previous_code = assistant.prepare_final_prompt_with_steps(
+                        prob_data=reference.row,
+                        num_steps=original_index + 1,
+                        tot_steps=len(reference.row["sub_steps"]),
+                        prompt_template=prompt_template,
+                        save=False,
+                    )
+                    assistant.register_previous_response(
+                        prob_data=reference.row,
+                        response=subtrace.last_assistant().text_content,
+                        previous_code=previous_code,
+                        num_steps=original_index + 1,
+                    )
+                finally:
+                    os.chdir(old_cwd)
         with tempfile.TemporaryDirectory(prefix="scicode-avacore-", dir=output_dir) as tmp:
             evaluator = _official_adapter().ScicodeEvaluator(
                 h5py_file=reference.h5py_file,
@@ -372,8 +414,13 @@ async def run(args: argparse.Namespace) -> None:
         _endpoint_base_url(args.base_url),
         headers=HttpEndpoint.bearer(args.api_key),
     )
+    temperature = (
+        args.temperature
+        if args.temperature is not None
+        else (1.0 if args.qwen_thinking_profile else 0.0)
+    )
     sampling_params = {
-        "temperature": args.temperature,
+        "temperature": temperature,
         "max_tokens": args.max_tokens,
         **(
             {"reasoning_effort": args.reasoning_effort}
@@ -386,6 +433,32 @@ async def run(args: argparse.Namespace) -> None:
             else {}
         ),
     }
+    if args.qwen_thinking_profile:
+        if args.disable_thinking:
+            raise SystemExit("--qwen-thinking-profile cannot be combined with --disable-thinking")
+        # Qwen's published thinking-mode recipe. Send every value explicitly;
+        # otherwise an OpenAI-compatible gateway may silently apply its own
+        # defaults or the serving framework's generation_config.
+        sampling_params.update(
+            {
+                "top_p": 0.95,
+                "top_k": 20,
+                "min_p": 0.0,
+                "presence_penalty": 0.0,
+                "frequency_penalty": 0.0,
+                "repetition_penalty": 1.0,
+                "chat_template_kwargs": {
+                    "enable_thinking": True,
+                    "preserve_thinking": True,
+                },
+            }
+        )
+    if args.max_tokens >= args.context_length:
+        raise SystemExit(
+            f"--max-tokens ({args.max_tokens}) must be smaller than the total "
+            f"context length ({args.context_length}); max output also shares "
+            "the context with the prompt"
+        )
     model = TraceOpenAIClient(
         endpoint,
         args.model,
@@ -398,6 +471,7 @@ async def run(args: argparse.Namespace) -> None:
         with_background=args.with_background,
         output_dir=output_dir,
         max_steps=args.max_steps,
+        request_sampling_params=sampling_params,
     )
     pairs = [
         (
@@ -431,6 +505,7 @@ async def run(args: argparse.Namespace) -> None:
                 "with_background": args.with_background,
                 "score_metric": "subproblem_correctness" if args.score_by_subproblem else "problem_correctness",
                 "h5py_file": str(Path(args.h5py_file).resolve()),
+                "context_length": args.context_length,
             },
             schema=Schema(preview="problem_id"),
             resume=args.resume,
@@ -538,8 +613,24 @@ def main() -> None:
         action="store_true",
         help="Use the weighted subproblem pass rate as the AvaCore run score",
     )
-    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature (defaults to 0.0, or 1.0 with --qwen-thinking-profile)",
+    )
     parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument(
+        "--context-length",
+        type=int,
+        default=262144,
+        help="Provider total context limit; max_tokens includes only the output but shares this limit",
+    )
+    parser.add_argument(
+        "--qwen-thinking-profile",
+        action="store_true",
+        help="Use Qwen's published thinking-mode sampling recipe explicitly",
+    )
     parser.add_argument(
         "--reasoning-effort",
         default=os.getenv("REASONING_EFFORT"),
