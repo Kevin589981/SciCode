@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from .candidate import CandidateValidationError, load_candidate
 from .checks import run_candidate_checks
 from .samples import SampleExportError, export_subproblem_samples
+from .trace_checks import audit_rollouts
 
 
 PIPELINE_STATES = (
@@ -96,6 +97,17 @@ def run_candidate_pipeline(
         "warnings": warnings,
     }
     if rollouts is not None:
+        trace_audit = audit_rollouts(
+            manifest,
+            rollouts,
+            require_usage=not allow_qa_export,
+        )
+        result["trace_audit"] = trace_audit
+        _write_json(root / "validation" / "trace_report.json", trace_audit)
+        if trace_audit["status"] != "ok" and not allow_qa_export:
+            raise PipelineError("exported trace completeness checks failed")
+        if trace_audit["status"] != "ok":
+            warnings.append("trace completeness checks failed; samples remain QA-only")
         run_is_promotable = True
         if run_manifest is not None:
             run_value = _read_json(Path(run_manifest))

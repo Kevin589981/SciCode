@@ -10,7 +10,8 @@ Use this skill only after the candidate release gate passes.
 ## Validate and lock
 
 1. Re-run schema, static, oracle, provenance, leakage, prompt, and trace
-   checks. Reject incomplete or privately mounted runs.
+   checks. Run `scripts/check_trace.py` with `--require-usage` and reject
+   incomplete or privately mounted runs.
 2. Acquire the delivery lock under the configured workspace root.
 3. Read the registry before writing. Deduplicate by candidate revision,
    problem id, step number, and trace hash.

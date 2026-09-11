@@ -7,6 +7,7 @@ from .handoff import HandoffError, build_avacore_command, submit_avacore
 from .run_manifest import build_run_manifest, is_promotable
 from .samples import SampleExportError, export_subproblem_samples
 from .pipeline import PipelineError, run_candidate_pipeline
+from .trace_checks import audit_rollouts
 
 __all__ = [
     "CandidateManifest",
@@ -24,5 +25,6 @@ __all__ = [
     "merge_candidate",
     "run_candidate_pipeline",
     "run_candidate_checks",
+    "audit_rollouts",
     "submit_avacore",
 ]

@@ -37,12 +37,12 @@ Use the candidate-aware runner:
 ```bash
 /root/scicode-avacore/AvaCore/.venv/bin/python \
   eval/avacore/scicode_avacore.py \
-  --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID \
+  --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID \
   --base-url http://10.100.184.127:5050 \
   --model "$KIMI_MODEL" \
   --postgres "$POSTGRES" \
-  --output /root/scicode-authoring/candidates/CANDIDATE_ID/runs/RUN_ID \
-  --export /root/scicode-authoring/candidates/CANDIDATE_ID/runs/RUN_ID/rollouts.jsonl \
+  --output /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID/runs/RUN_ID \
+  --export /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID/runs/RUN_ID/rollouts.jsonl \
   --run-name RUN_ID \
   --temperature 0.6 \
   --max-tokens 262144 \
@@ -76,8 +76,8 @@ Run the delivery skill after the release decision:
 
 ```bash
 python scripts/export_subproblem_samples.py \
-  --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID \
-  --rollouts /root/scicode-authoring/candidates/CANDIDATE_ID/runs/RUN_ID/rollouts.jsonl \
+  --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID \
+  --rollouts /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID/runs/RUN_ID/rollouts.jsonl \
   --registry /root/scicode-authoring/delivery/registry.jsonl \
   --output /root/scicode-authoring/delivery/dataset.jsonl \
   --summary /root/scicode-authoring/delivery/summary.json \

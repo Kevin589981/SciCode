@@ -132,6 +132,11 @@ def _require_text(value: Any, label: str) -> None:
         raise CandidateValidationError(f"{label} must be a non-empty string")
 
 
+def _require_string(value: Any, label: str) -> None:
+    if not isinstance(value, str):
+        raise CandidateValidationError(f"{label} must be a string")
+
+
 def validate_rows(rows: Iterable[Mapping[str, Any]], source: str | Path) -> list[dict[str, Any]]:
     """Validate the official SciCode record shape without rewriting it."""
     source = Path(source)
@@ -143,6 +148,12 @@ def validate_rows(rows: Iterable[Mapping[str, Any]], source: str | Path) -> list
             raise CandidateValidationError(
                 f"row {row_number} in {source} is missing: {', '.join(sorted(missing))}"
             )
+        extra = row.keys() - TOP_LEVEL_FIELDS
+        if extra:
+            raise CandidateValidationError(
+                f"row {row_number} in {source} has non-SciCode fields: "
+                + ", ".join(sorted(extra))
+            )
         problem_id = str(row["problem_id"])
         if not _ID_PATTERN.fullmatch(problem_id):
             raise CandidateValidationError(
@@ -151,8 +162,14 @@ def validate_rows(rows: Iterable[Mapping[str, Any]], source: str | Path) -> list
         if problem_id in problem_ids:
             raise CandidateValidationError(f"duplicate problem_id: {problem_id}")
         problem_ids.add(problem_id)
-        _require_text(row["problem_name"], f"{problem_id}.problem_name")
-        _require_text(row["required_dependencies"], f"{problem_id}.required_dependencies")
+        for field in (
+            "problem_name",
+            "problem_description_main",
+            "problem_io",
+            "required_dependencies",
+        ):
+            _require_text(row[field], f"{problem_id}.{field}")
+        _require_string(row["problem_background_main"], f"{problem_id}.problem_background_main")
         if not isinstance(row["sub_steps"], list) or not row["sub_steps"]:
             raise CandidateValidationError(f"{problem_id}.sub_steps must be a non-empty list")
         step_ids: set[str] = set()
@@ -168,12 +185,23 @@ def validate_rows(rows: Iterable[Mapping[str, Any]], source: str | Path) -> list
                     f"{problem_id} step {step_index} is missing: "
                     + ", ".join(sorted(missing_step))
                 )
+            extra_step = step.keys() - STEP_FIELDS
+            if extra_step:
+                raise CandidateValidationError(
+                    f"{problem_id} step {step_index} has non-SciCode fields: "
+                    + ", ".join(sorted(extra_step))
+                )
             step_id = str(step["step_number"])
             if not step_id or step_id in step_ids:
                 raise CandidateValidationError(f"duplicate step_number in {problem_id}: {step_id!r}")
             step_ids.add(step_id)
-            for field in ("step_description_prompt", "function_header", "return_line"):
+            for field in (
+                "step_description_prompt",
+                "function_header",
+                "return_line",
+            ):
                 _require_text(step[field], f"{problem_id}.{step_id}.{field}")
+            _require_string(step["step_background"], f"{problem_id}.{step_id}.step_background")
             if not isinstance(step["test_cases"], list) or not step["test_cases"]:
                 raise CandidateValidationError(f"{problem_id}.{step_id}.test_cases must be non-empty")
             if not all(isinstance(case, str) and case.strip() for case in step["test_cases"]):

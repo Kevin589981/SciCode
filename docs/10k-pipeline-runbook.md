@@ -46,7 +46,8 @@ cd /root/scicode-authoring/repository
 kimi -p "Read AGENTS.md and .agents/skills. Create candidate cand-000001 in a dedicated worktree. Follow every authoring, child-review, strict AvaCore handoff, and delivery command. Do not use official SciCode tasks or test_data.h5. Stop the authoring session after submitting the AvaCore handoff and record the resume session id."
 ```
 
-The controller must use `scripts/worktree.py`, run the candidate checks, and
+The controller must use `scripts/worktree.py`, create
+`authoring/<CANDIDATE_ID>` inside the returned worktree, run the candidate checks, and
 ask a fresh child agent to review the public task before handoff.
 
 ## Submit and monitor the Kimi solver run
@@ -56,7 +57,7 @@ The AvaCore skill submits a detached process and writes
 
 ```bash
 python scripts/avacore_run_status.py \
-  /root/scicode-authoring/candidates/cand-000001/runs/cand-000001-r1/handoff.json
+  /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/cand-000001-r1/handoff.json
 ```
 
 After the runner closes, require these files before resuming Kimi Code:
@@ -80,10 +81,10 @@ or run its deterministic wrapper:
 
 ```bash
 python scripts/run_candidate_pipeline.py \
-  --candidate-dir /root/scicode-authoring/candidates/cand-000001 \
+  --candidate-dir /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001 \
   --delivery-root /root/scicode-authoring/delivery \
-  --rollouts /root/scicode-authoring/candidates/cand-000001/runs/RUN_ID/rollouts.jsonl \
-  --run-manifest /root/scicode-authoring/candidates/cand-000001/runs/RUN_ID/manifest.json \
+  --rollouts /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/rollouts.jsonl \
+  --run-manifest /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/manifest.json \
   --target-count 10000
 ```
 
@@ -97,9 +98,9 @@ The worktree branch remains in Git history after the copy is cleaned.
 Check the handoff log, run manifest, and database run independently:
 
 ```bash
-tail -n 100 /root/scicode-authoring/candidates/cand-000001/runs/RUN_ID/avacore.log
-cat /root/scicode-authoring/candidates/cand-000001/runs/RUN_ID/manifest.json
-python scripts/avacore_run_status.py /root/scicode-authoring/candidates/cand-000001/runs/RUN_ID/handoff.json
+tail -n 100 /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/avacore.log
+cat /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/manifest.json
+python scripts/avacore_run_status.py /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/handoff.json
 ```
 
 Classify provider/network/queue/database errors as infrastructure. Classify a

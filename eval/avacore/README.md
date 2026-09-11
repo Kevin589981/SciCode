@@ -51,10 +51,10 @@ cd /root/scicode-avacore/SciCode/eval/avacore
 /root/scicode-avacore/AvaCore/.venv/bin/python scicode_avacore.py \
   --base-url http://117.135.59.14:5050 \
   --model Kimi-K3 \
-  --run-name candidate-clean-003-agentic \
+  --run-name candidate-clean-003-strict \
   --problem-file /root/scicode-avacore/SciCode/sandbox/candidate_task_clean_003/public/problem.jsonl \
   --h5py-file /root/scicode-avacore/SciCode/sandbox/candidate_task_clean_003/oracle/targets.h5 \
-  --output /root/scicode-avacore/runs/candidate-clean-003-agentic \
+  --output /root/scicode-avacore/runs/candidate-clean-003-strict \
   --score-by-subproblem \
   --concurrency 1
 ```
@@ -72,12 +72,12 @@ promotability manifest beside the exported rollouts:
 
 ```bash
 /root/scicode-avacore/AvaCore/.venv/bin/python scicode_avacore.py \
-  --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID \
+  --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID \
   --base-url http://10.100.184.127:5050 \
   --model "$KIMI_MODEL" \
   --postgres "$POSTGRES" \
-  --output /root/scicode-authoring/candidates/CANDIDATE_ID/runs/avacore-final \
-  --export /root/scicode-authoring/candidates/CANDIDATE_ID/runs/avacore-final/rollouts.jsonl \
+  --output /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID/runs/avacore-final \
+  --export /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID/runs/avacore-final/rollouts.jsonl \
   --run-name CANDIDATE_ID-r1-final \
   --temperature 0.6 \
   --max-tokens 262144 \

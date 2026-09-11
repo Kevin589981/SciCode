@@ -109,3 +109,21 @@ def test_candidate_rejects_official_marker(tmp_path):
     )
     with pytest.raises(CandidateValidationError, match="official/private"):
         load_candidate(root)
+
+
+def test_candidate_rejects_extra_solver_visible_fields(tmp_path):
+    root = make_candidate(tmp_path)
+    row = json.loads((root / "public" / "problem.jsonl").read_text())
+    row["hidden_hint"] = "do not expose this"
+    (root / "public" / "problem.jsonl").write_text(json.dumps(row) + "\n")
+    with pytest.raises(CandidateValidationError, match="non-SciCode fields"):
+        load_candidate(root)
+
+
+def test_candidate_rejects_extra_step_fields(tmp_path):
+    root = make_candidate(tmp_path)
+    row = json.loads((root / "public" / "problem.jsonl").read_text())
+    row["sub_steps"][0]["hidden_hint"] = "do not expose this"
+    (root / "public" / "problem.jsonl").write_text(json.dumps(row) + "\n")
+    with pytest.raises(CandidateValidationError, match="non-SciCode fields"):
+        load_candidate(root)

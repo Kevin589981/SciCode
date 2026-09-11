@@ -119,6 +119,17 @@ def submit_avacore(
     child_env = os.environ.copy()
     if env:
         child_env.update(env)
+    # The detached child runs from the AvaCore environment, which may not have
+    # this checkout installed as a package.  Carry the repository source path
+    # explicitly so nested candidates work from a clean clone as well.
+    repository_root = Path(runner).expanduser().resolve().parents[2]
+    source_path = str(repository_root / "src")
+    inherited_pythonpath = child_env.get("PYTHONPATH", "")
+    child_env["PYTHONPATH"] = (
+        source_path
+        if not inherited_pythonpath
+        else os.pathsep.join((source_path, inherited_pythonpath))
+    )
     # The caller supplies POSTGRES/OPENAI_API_KEY through the inherited
     # environment; neither value is copied into the handoff manifest.
     with log_path.open("ab") as log:

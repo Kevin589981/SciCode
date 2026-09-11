@@ -26,10 +26,13 @@ Use this skill before creating or editing a candidate.
      --base-ref "$INTEGRATION_BRANCH"
    ```
 
-5. Record the returned worktree path, branch, base commit, lock path, and
-   process id in `authoring/<CANDIDATE_ID>/candidate.json`.
-6. Keep all candidate edits, source clones, tests, and run outputs below that
-   worktree. Never edit the shared checkout or another candidate worktree.
+5. Create `authoring/<CANDIDATE_ID>/` inside the returned worktree and record
+   the worktree path, branch, base commit, lock path, and process id in
+   `authoring/<CANDIDATE_ID>/candidate.json`.
+6. Set `CANDIDATE_DIR` to the nested `authoring/<CANDIDATE_ID>` path. Keep all
+   candidate edits, source clones, tests, and run outputs below that directory
+   or its worktree. Never edit the shared checkout or another candidate
+   worktree.
 7. Commit candidate changes before requesting delivery. Use one branch per
    candidate; retain the branch after deleting the worktree copy.
 8. Release the lock only after the delivery skill records the final decision.

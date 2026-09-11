@@ -68,10 +68,12 @@ Use the following network policy:
 
 ## 4. Use one fixed candidate layout
 
-Create exactly this layout for `CANDIDATE_ID`:
+Treat the Git worktree as a complete repository checkout. Create exactly this
+layout below the worktree for `CANDIDATE_ID`; set `CANDIDATE_DIR` to this
+nested directory when invoking validation, AvaCore, or delivery:
 
 ```text
-authoring/CANDIDATE_ID/
+<worktree>/authoring/CANDIDATE_ID/
   candidate.json                    # metadata-only manifest
   public/problem.jsonl               # canonical SciCode record
   public/solver_payload/             # redacted solver-visible files
@@ -300,7 +302,8 @@ Invoke `.agents/skills/scicode-delivery/SKILL.md` only after the release gate
 passes. Require the skill to:
 
 1. Re-run schema, static, oracle, provenance, leakage, trace, and runtime
-   checks from the candidate worktree.
+   checks from the candidate worktree. Run `scripts/check_trace.py` with
+   `--require-usage` before accepting an exported run.
 2. Acquire the delivery lock and inspect the registry before writing.
 3. Convert each complete non-skipped subproblem trace into exactly one record
    using the SFT-compatible fields:
@@ -377,6 +380,7 @@ validation/leakage_report.json
 validation/release_decision.json
 runs/<run_id>/manifest.json
 runs/<run_id>/rollouts.jsonl
+validation/trace_report.json
 ```
 
 Write the exact candidate revision, source commit, hashes, mode (`strict`),
