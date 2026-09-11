@@ -1,0 +1,17 @@
+{
+  "workspace_root": "/root/scicode-authoring",
+  "repository_root": "/root/scicode-authoring/repository",
+  "integration_branch": "codex/scicode-10k-pipeline",
+  "delivery_root": "/root/scicode-authoring/delivery",
+  "avacore_python": "/root/scicode-avacore/AvaCore/.venv/bin/python",
+  "avacore_runner": "/root/scicode-authoring/repository/eval/avacore/scicode_avacore.py",
+  "kimi_base_url": "http://10.100.184.127:5050",
+  "kimi_model": "Kimi-K3",
+  "temperature": 0.6,
+  "max_tokens": 262144,
+  "timeout_seconds": 7200,
+  "http_retries": 5,
+  "run_retries": 3,
+  "concurrency": 1,
+  "target_samples": 10000
+}

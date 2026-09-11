@@ -1,4 +1,4 @@
-"""Run the official SciCode protocol through AvaCore.
+"""Run the strict SciCode protocol through AvaCore.
 
 The adapter deliberately keeps SciCode's prompt construction and evaluator as
 the source of truth. AvaCore supplies the model client, rollout lifecycle, and
@@ -32,7 +32,13 @@ from ava_core.utils.io import write_jsonl
 from datasets import load_dataset
 
 from scicode.gen.models import extract_python_script
-from scicode.parse.parse import read_from_jsonl
+from scicode.pipeline.candidate import (
+    CandidateManifest,
+    load_candidate,
+    read_jsonl,
+    validate_rows,
+)
+from scicode.pipeline.run_manifest import build_run_manifest, write_json_atomic
 
 _OFFICIAL_CWD = Path(__file__).parents[1] / "inspect_ai"
 _OFFICIAL_LOCK = asyncio.Lock()
@@ -142,6 +148,10 @@ class TraceOpenAIClient(OpenAIClient):
         }
         if response.get("usage") is not None:
             metadata["usage"] = response["usage"]
+        # Keep the provider-native response in the trace without retaining
+        # request headers or credentials. The subproblem exporter uses this
+        # field to preserve the previous SFT record contract.
+        metadata["provider_response"] = response
         assistant = replace(assistant, metadata=metadata)
         return trace.extend(messages=(assistant,), query=trace, is_generated=True)
 
@@ -347,8 +357,7 @@ async def load_rows(
         source = Path(problem_file).expanduser().resolve()
         if not source.is_file():
             raise SystemExit(f"Problem JSONL does not exist: {source}")
-        rows = [dict(row) for row in read_from_jsonl(source)]
-        _validate_rows(rows, source)
+        rows = validate_rows(read_jsonl(source), source)
     else:
         dataset = load_dataset("SciCode1/SciCode", split=split)
         rows = [dict(row) for row in dataset]
@@ -356,43 +365,6 @@ async def load_rows(
         selected = set(problem_ids)
         rows = [row for row in rows if str(row["problem_id"]) in selected]
     return rows[:limit] if limit is not None else rows
-
-
-def _validate_rows(rows: list[dict[str, Any]], source: Path) -> None:
-    """Fail before contacting a model when a candidate is not SciCode-shaped."""
-    required_row_fields = {"problem_id", "required_dependencies", "sub_steps"}
-    required_step_fields = {
-        "step_number",
-        "step_description_prompt",
-        "function_header",
-        "return_line",
-        "test_cases",
-    }
-    seen: set[str] = set()
-    for row_index, row in enumerate(rows, start=1):
-        missing = required_row_fields - row.keys()
-        if missing:
-            raise SystemExit(
-                f"Candidate row {row_index} in {source} is missing: "
-                + ", ".join(sorted(missing))
-            )
-        problem_id = str(row["problem_id"])
-        if problem_id in seen:
-            raise SystemExit(f"Duplicate candidate problem_id {problem_id!r} in {source}")
-        seen.add(problem_id)
-        if not isinstance(row["sub_steps"], list) or not row["sub_steps"]:
-            raise SystemExit(f"Candidate problem {problem_id!r} has no sub_steps")
-        for step_index, step in enumerate(row["sub_steps"], start=1):
-            if not isinstance(step, Mapping):
-                raise SystemExit(
-                    f"Candidate problem {problem_id!r} step {step_index} is not an object"
-                )
-            missing_step = required_step_fields - step.keys()
-            if missing_step:
-                raise SystemExit(
-                    f"Candidate problem {problem_id!r} step {step_index} is missing: "
-                    + ", ".join(sorted(missing_step))
-                )
 
 
 def _aggregate_run_score(results: list[RolloutResult], *, score_by_subproblem: bool) -> float:
@@ -407,6 +379,24 @@ def _aggregate_run_score(results: list[RolloutResult], *, score_by_subproblem: b
 
 
 async def run(args: argparse.Namespace) -> None:
+    candidate: CandidateManifest | None = None
+    if args.candidate_dir:
+        candidate = load_candidate(args.candidate_dir)
+        candidate_problem = Path(candidate.problem_file).resolve()
+        if args.problem_file and Path(args.problem_file).resolve() != candidate_problem:
+            raise SystemExit("--problem-file disagrees with --candidate-dir/public/problem.jsonl")
+        args.problem_file = str(candidate_problem)
+        if not args.h5py_file:
+            args.h5py_file = candidate.oracle_file
+        elif Path(args.h5py_file).resolve() != Path(candidate.oracle_file).resolve():
+            raise SystemExit("--h5py-file disagrees with --candidate-dir/oracle/targets.h5")
+    if args.validate_only:
+        if candidate is None:
+            raise SystemExit("--validate-only requires --candidate-dir")
+        print(json.dumps({"status": "candidate_valid", "candidate": candidate.as_dict()}, ensure_ascii=False))
+        return
+    if not args.h5py_file:
+        raise SystemExit("Pass --h5py-file or --candidate-dir")
     if not args.postgres:
         raise SystemExit("Set POSTGRES or pass --postgres; AvaCore PostgreSQL is the primary trace store")
     rows = await load_rows(
@@ -417,6 +407,15 @@ async def run(args: argparse.Namespace) -> None:
     )
     if not rows:
         raise SystemExit("No SciCode rows matched the requested selection")
+    with_background = (
+        candidate.prompt_profile == "background"
+        if candidate is not None
+        else (
+            args.prompt_profile == "background"
+            if args.prompt_profile
+            else args.with_background
+        )
+    )
     output_dir = Path(args.output).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     endpoint = HttpEndpoint.from_url(
@@ -446,7 +445,7 @@ async def run(args: argparse.Namespace) -> None:
     )
     generate = SciCodeGenerate(
         model,
-        with_background=args.with_background,
+        with_background=with_background,
         output_dir=output_dir,
         max_steps=args.max_steps,
     )
@@ -457,12 +456,40 @@ async def run(args: argparse.Namespace) -> None:
                 row=row,
                 h5py_file=str(Path(args.h5py_file).resolve()),
                 output_dir=str(output_dir / str(row["problem_id"])),
-                with_background=args.with_background,
+                with_background=with_background,
             ),
         )
         for row in rows
     ]
     run_name = args.run_name or datetime.now(timezone.utc).strftime("scicode-%Y%m%dT%H%M%SZ")
+    expected_subproblems = sum(len(_active_steps(row)) for row in rows)
+    run_config = {
+        "split": args.split,
+        "problem_file": str(Path(args.problem_file).resolve()) if args.problem_file else None,
+        "problem_ids": args.problem_id,
+        "with_background": with_background,
+        "prompt_profile": "background" if with_background else "without_background",
+        "score_metric": "subproblem_correctness" if args.score_by_subproblem else "problem_correctness",
+        "h5py_file": str(Path(args.h5py_file).resolve()),
+        "base_url": args.base_url,
+        "model": args.model,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+        "timeout": args.timeout,
+        "http_retries": args.http_retries,
+        "concurrency": args.concurrency,
+        "max_steps": args.max_steps,
+    }
+    if candidate is not None:
+        run_config["candidate_id"] = candidate.candidate_id
+        run_config["task_revision"] = candidate.revision
+        run_config["candidate_hashes"] = {
+            "canonical_record_sha256": candidate.canonical_record_sha256,
+            "visible_contract_sha256": candidate.visible_contract_sha256,
+            "solver_payload_sha256": candidate.solver_payload_sha256,
+            "oracle_sha256": candidate.oracle_sha256,
+            "provenance_sha256": candidate.provenance_sha256,
+        }
     backend = PostgresBackend(args.postgres)
     results: list[RolloutResult] = []
     errors = 0
@@ -476,18 +503,7 @@ async def run(args: argparse.Namespace) -> None:
             size=len(pairs),
             trials=1,
             sampling_params=sampling_params,
-            config={
-                "split": args.split,
-                "problem_file": (
-                    str(Path(args.problem_file).resolve())
-                    if args.problem_file
-                    else None
-                ),
-                "problem_ids": args.problem_id,
-                "with_background": args.with_background,
-                "score_metric": "subproblem_correctness" if args.score_by_subproblem else "problem_correctness",
-                "h5py_file": str(Path(args.h5py_file).resolve()),
-            },
+            config=run_config,
             schema=Schema(preview="problem_id"),
             resume=args.resume,
         ) as stored_run:
@@ -532,6 +548,16 @@ async def run(args: argparse.Namespace) -> None:
                         successful_rollouts=len(results),
                         errors=errors,
                     )
+            await stored_run.update(
+                status=("finished" if errors == 0 and len(results) == len(pairs) else "failed"),
+                score=_aggregate_run_score(
+                    results,
+                    score_by_subproblem=args.score_by_subproblem,
+                ),
+                samples=len(results),
+                successful_rollouts=len(results),
+                errors=errors,
+            )
 
         export_path = Path(args.export or output_dir / "rollouts.jsonl").resolve()
         export_path.parent.mkdir(parents=True, exist_ok=True)
@@ -554,6 +580,43 @@ async def run(args: argparse.Namespace) -> None:
         if rewards
         else 0.0
     )
+    run_usage = {}
+    if rewards:
+        usage_values = [reward.metadata.get("usage", {}) for reward in rewards]
+        run_usage = {
+            key: sum(
+                value.get(key, 0)
+                for value in usage_values
+                if isinstance(value, Mapping)
+            )
+            for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens", "total_tokens")
+        }
+    completed_subproblems = sum(
+        len(item.trace.subtraces or [])
+        for item in results
+        if getattr(item, "trace", None) is not None
+    )
+    manifest = build_run_manifest(
+        run_id=run_name,
+        status=("finished" if errors == 0 and len(results) == len(pairs) else "failed"),
+        config=run_config,
+        candidate=candidate,
+        expected_problems=len(pairs),
+        expected_subproblems=expected_subproblems,
+        completed_problems=len(results),
+        completed_subproblems=completed_subproblems,
+        errors=errors,
+        trace_export=export_path,
+        usage=run_usage,
+        retries=args.http_retries,
+        notes=(
+            ["debug_max_steps"]
+            if args.max_steps is not None
+            else []
+        ),
+    )
+    manifest_path = Path(args.run_manifest or output_dir / "manifest.json").resolve()
+    write_json_atomic(manifest_path, manifest)
     print(json.dumps({
         "run": run_name,
         "samples": len(results),
@@ -566,6 +629,11 @@ async def run(args: argparse.Namespace) -> None:
             score_by_subproblem=args.score_by_subproblem,
         ),
         "trace_file": str(export_path),
+        "manifest_file": str(manifest_path),
+        "candidate_id": candidate.candidate_id if candidate else None,
+        "task_revision": candidate.revision if candidate else None,
+        "trace_complete": manifest["trace_complete"],
+        "promotable": manifest["promotable"],
     }, ensure_ascii=False))
 
 
@@ -573,12 +641,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-url",
-        default=os.getenv("BASE_URL", "http://localhost:8000"),
+        default=os.getenv("BASE_URL", "http://10.100.184.127:5050"),
         help="OpenAI-compatible root URL; a trailing /v1 is accepted",
     )
     parser.add_argument("--api-key", default=os.getenv("OPENAI_API_KEY", "dummy"))
     parser.add_argument("--model", default=os.getenv("MODEL", "Kimi-K3"))
     parser.add_argument("--split", default="test")
+    parser.add_argument(
+        "--candidate-dir",
+        help="Candidate root containing public/problem.jsonl and oracle/targets.h5",
+    )
     parser.add_argument(
         "--problem-file",
         help=(
@@ -589,20 +661,31 @@ def main() -> None:
     parser.add_argument("--problem-id", action="append")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-steps", type=int)
-    parser.add_argument("--h5py-file", required=True)
+    parser.add_argument("--h5py-file")
     parser.add_argument("--output", default="./avacore_runs")
     parser.add_argument("--postgres", default=os.getenv("POSTGRES"))
     parser.add_argument("--run-name")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--export", help="JSONL destination; exported from PostgreSQL after the run")
+    parser.add_argument("--run-manifest", help="Run manifest destination (defaults to <output>/manifest.json)")
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate --candidate-dir and print its manifest without contacting a provider",
+    )
     parser.add_argument("--with-background", action="store_true")
+    parser.add_argument(
+        "--prompt-profile",
+        choices=("background", "without_background"),
+        help="Fixed SciCode prompt profile; candidate metadata takes precedence",
+    )
     parser.add_argument(
         "--score-by-subproblem",
         action="store_true",
         help="Use the weighted subproblem pass rate as the AvaCore run score",
     )
     parser.add_argument("--temperature", type=float, default=0.0)
-    parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--max-tokens", type=int, default=262144)
     parser.add_argument(
         "--reasoning-effort",
         default=os.getenv("REASONING_EFFORT"),

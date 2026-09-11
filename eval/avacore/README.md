@@ -65,6 +65,29 @@ contract as official runs, while the candidate's own HDF5 oracle remains the
 private scoring artifact. `--problem-id` and `--limit` can still be used to
 select records from a local candidate JSONL.
 
+For a fully validated candidate, use `--candidate-dir` instead. The runner
+resolves `public/problem.jsonl` and `oracle/targets.h5` from that directory,
+checks the candidate manifest before contacting the provider, and writes a
+promotability manifest beside the exported rollouts:
+
+```bash
+/root/scicode-avacore/AvaCore/.venv/bin/python scicode_avacore.py \
+  --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID \
+  --base-url http://10.100.184.127:5050 \
+  --model "$KIMI_MODEL" \
+  --postgres "$POSTGRES" \
+  --output /root/scicode-authoring/candidates/CANDIDATE_ID/runs/avacore-final \
+  --export /root/scicode-authoring/candidates/CANDIDATE_ID/runs/avacore-final/rollouts.jsonl \
+  --run-name CANDIDATE_ID-r1-final \
+  --temperature 0.6 \
+  --max-tokens 262144 \
+  --timeout 7200 \
+  --score-by-subproblem
+```
+
+The default output limit is 262,144 tokens. A run with `--max-steps` is marked
+debug-only and cannot be promoted to the formal dataset.
+
 The resulting database rollouts record `problem_correctness` in `reward.score`
 and the official aggregate fields `total_correct` and `total_steps` in
 `reward.metadata`. The generated `rollouts.jsonl` is produced by AvaCore's
