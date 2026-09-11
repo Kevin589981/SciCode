@@ -594,3 +594,41 @@ Stop and reject the candidate instead of improvising when:
 
 Do not add private analysis to the solver-visible task. Keep author-only
 decisions and review evidence outside the public problem record.
+
+## 14. One-pass quality run and formal evaluation
+
+When the quality gate is executed through AvaCore, prefer one complete run
+that is both the final quality run and the formal evaluation run. Invoke
+`eval/avacore/scicode_avacore.py` with the candidate's
+`public/problem.jsonl`, candidate-owned HDF5 oracle, final model settings,
+the accepted mode, and the production trace store. This run must cover every
+ordered subproblem and must write the database rollout plus the exported
+`rollouts.jsonl`.
+
+Promote that run without a second model invocation only when its manifest
+records all of the following: the candidate revision and source hashes, the
+same prompt profile and mode intended for release, the final model and
+sampling parameters, the complete candidate problem file, the candidate
+oracle path and hash, successful private verification, and a complete
+trace/export. A reviewer saying “quality is good” is not sufficient evidence
+for promotion.
+
+If the quality run used a debugging-only limit, a different prompt profile,
+an alternate oracle, a different model configuration, an incomplete set of
+subproblems, or a solver workspace with private material, mark it as a QA
+trace and run the formal evaluation separately. Never merge scores from the
+two purposes. The candidate source and oracle are selected with:
+
+```bash
+python eval/avacore/scicode_avacore.py \
+  --problem-file authoring/CANDIDATE_ID/public/problem.jsonl \
+  --h5py-file authoring/CANDIDATE_ID/oracle/targets.h5 \
+  --output authoring/CANDIDATE_ID/runs/avacore-final \
+  --export authoring/CANDIDATE_ID/runs/avacore-final/rollouts.jsonl
+```
+
+Kimi Code is the process that performs authoring, review, revision, and the
+decision to request this run. The AvaCore adapter is the stable execution
+boundary: it records the provider interaction and score in one auditable
+place, regardless of whether the candidate originated from Strict or
+Agentic authoring.

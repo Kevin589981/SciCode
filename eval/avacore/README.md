@@ -39,6 +39,32 @@ Use `--problem-id 2` for the one-step smoke case. `--max-steps` is only for
 prompt/trace debugging and intentionally does not claim an official score,
 because the upstream evaluator requires all subproblem files for a problem.
 
+An authoring candidate can use the same runner without publishing it to the
+Hugging Face dataset. Point `--problem-file` at the candidate's canonical
+`public/problem.jsonl` and point `--h5py-file` at its private candidate-owned
+oracle. The JSONL must retain the official SciCode fields (`problem_id`,
+`required_dependencies`, `sub_steps`, and the test fields); evaluator-only
+fields are read locally and are never sent as a separate prompt. For example:
+
+```bash
+cd /root/scicode-avacore/SciCode/eval/avacore
+/root/scicode-avacore/AvaCore/.venv/bin/python scicode_avacore.py \
+  --base-url http://117.135.59.14:5050 \
+  --model Kimi-K3 \
+  --run-name candidate-clean-003-agentic \
+  --problem-file /root/scicode-avacore/SciCode/sandbox/candidate_task_clean_003/public/problem.jsonl \
+  --h5py-file /root/scicode-avacore/SciCode/sandbox/candidate_task_clean_003/oracle/targets.h5 \
+  --output /root/scicode-avacore/runs/candidate-clean-003-agentic \
+  --score-by-subproblem \
+  --concurrency 1
+```
+
+The candidate source is recorded in the AvaCore run configuration. The
+PostgreSQL row and exported `rollouts.jsonl` therefore carry the same trace
+contract as official runs, while the candidate's own HDF5 oracle remains the
+private scoring artifact. `--problem-id` and `--limit` can still be used to
+select records from a local candidate JSONL.
+
 The resulting database rollouts record `problem_correctness` in `reward.score`
 and the official aggregate fields `total_correct` and `total_steps` in
 `reward.metadata`. The generated `rollouts.jsonl` is produced by AvaCore's

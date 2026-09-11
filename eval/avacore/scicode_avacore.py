@@ -32,6 +32,7 @@ from ava_core.utils.io import write_jsonl
 from datasets import load_dataset
 
 from scicode.gen.models import extract_python_script
+from scicode.parse.parse import read_from_jsonl
 
 _OFFICIAL_CWD = Path(__file__).parents[1] / "inspect_ai"
 _OFFICIAL_LOCK = asyncio.Lock()
@@ -340,13 +341,58 @@ async def load_rows(
     split: str,
     problem_ids: list[str] | None,
     limit: int | None,
+    problem_file: str | None = None,
 ) -> list[dict[str, Any]]:
-    dataset = load_dataset("SciCode1/SciCode", split=split)
-    rows = [dict(row) for row in dataset]
+    if problem_file:
+        source = Path(problem_file).expanduser().resolve()
+        if not source.is_file():
+            raise SystemExit(f"Problem JSONL does not exist: {source}")
+        rows = [dict(row) for row in read_from_jsonl(source)]
+        _validate_rows(rows, source)
+    else:
+        dataset = load_dataset("SciCode1/SciCode", split=split)
+        rows = [dict(row) for row in dataset]
     if problem_ids:
         selected = set(problem_ids)
         rows = [row for row in rows if str(row["problem_id"]) in selected]
     return rows[:limit] if limit is not None else rows
+
+
+def _validate_rows(rows: list[dict[str, Any]], source: Path) -> None:
+    """Fail before contacting a model when a candidate is not SciCode-shaped."""
+    required_row_fields = {"problem_id", "required_dependencies", "sub_steps"}
+    required_step_fields = {
+        "step_number",
+        "step_description_prompt",
+        "function_header",
+        "return_line",
+        "test_cases",
+    }
+    seen: set[str] = set()
+    for row_index, row in enumerate(rows, start=1):
+        missing = required_row_fields - row.keys()
+        if missing:
+            raise SystemExit(
+                f"Candidate row {row_index} in {source} is missing: "
+                + ", ".join(sorted(missing))
+            )
+        problem_id = str(row["problem_id"])
+        if problem_id in seen:
+            raise SystemExit(f"Duplicate candidate problem_id {problem_id!r} in {source}")
+        seen.add(problem_id)
+        if not isinstance(row["sub_steps"], list) or not row["sub_steps"]:
+            raise SystemExit(f"Candidate problem {problem_id!r} has no sub_steps")
+        for step_index, step in enumerate(row["sub_steps"], start=1):
+            if not isinstance(step, Mapping):
+                raise SystemExit(
+                    f"Candidate problem {problem_id!r} step {step_index} is not an object"
+                )
+            missing_step = required_step_fields - step.keys()
+            if missing_step:
+                raise SystemExit(
+                    f"Candidate problem {problem_id!r} step {step_index} is missing: "
+                    + ", ".join(sorted(missing_step))
+                )
 
 
 def _aggregate_run_score(results: list[RolloutResult], *, score_by_subproblem: bool) -> float:
@@ -363,7 +409,12 @@ def _aggregate_run_score(results: list[RolloutResult], *, score_by_subproblem: b
 async def run(args: argparse.Namespace) -> None:
     if not args.postgres:
         raise SystemExit("Set POSTGRES or pass --postgres; AvaCore PostgreSQL is the primary trace store")
-    rows = await load_rows(args.split, args.problem_id, args.limit)
+    rows = await load_rows(
+        args.split,
+        args.problem_id,
+        args.limit,
+        problem_file=args.problem_file,
+    )
     if not rows:
         raise SystemExit("No SciCode rows matched the requested selection")
     output_dir = Path(args.output).resolve()
@@ -427,6 +478,11 @@ async def run(args: argparse.Namespace) -> None:
             sampling_params=sampling_params,
             config={
                 "split": args.split,
+                "problem_file": (
+                    str(Path(args.problem_file).resolve())
+                    if args.problem_file
+                    else None
+                ),
                 "problem_ids": args.problem_id,
                 "with_background": args.with_background,
                 "score_metric": "subproblem_correctness" if args.score_by_subproblem else "problem_correctness",
@@ -523,6 +579,13 @@ def main() -> None:
     parser.add_argument("--api-key", default=os.getenv("OPENAI_API_KEY", "dummy"))
     parser.add_argument("--model", default=os.getenv("MODEL", "Kimi-K3"))
     parser.add_argument("--split", default="test")
+    parser.add_argument(
+        "--problem-file",
+        help=(
+            "Local SciCode-compatible JSONL source, such as a candidate's "
+            "public/problem.jsonl; when set, do not load Hugging Face data"
+        ),
+    )
     parser.add_argument("--problem-id", action="append")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--max-steps", type=int)
