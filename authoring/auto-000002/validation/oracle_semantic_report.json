@@ -51,27 +51,18 @@
           "step_number": "1",
           "passed": false,
           "failures": [
-            "test1: AssertionError: ",
-            "test2: AssertionError: ",
-            "test3: AssertionError: "
+            "test2: AssertionError: "
           ]
         },
         {
           "step_number": "2",
-          "passed": false,
-          "failures": [
-            "test1: AssertionError: ",
-            "test3: AssertionError: "
-          ]
+          "passed": true,
+          "failures": []
         },
         {
           "step_number": "3",
-          "passed": false,
-          "failures": [
-            "test1: AssertionError: ",
-            "test2: AssertionError: ",
-            "test3: AssertionError: "
-          ]
+          "passed": true,
+          "failures": []
         }
       ]
     }

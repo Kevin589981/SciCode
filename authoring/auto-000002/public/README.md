@@ -1,6 +1,6 @@
 # auto-000002 candidate files
 
-This directory contains the solver-visible public files for candidate `auto-000002`.
+This directory contains the solver-visible public files for candidate `auto-000002`, revision `r2`.
 
 ## Visible files
 

@@ -7,8 +7,8 @@ PREVIOUS STEPS DESCRIPTION:
 NEXT STEP - PROBLEM DESCRIPTION AND FUNCTION HEADER:
 This part will describe the next step in the problem-solving process. First, provide the necessary scientific background knowledge as a comment at the beginning of your response, starting with 'Background: '. Then, a function header will be provided, and your task is to develop the Python code for this next step based on the provided description and function header.
 
-Build the periodic upwind flux-difference operator. For constant velocity a, the flux is F_i = a q_i. Return the semi-discrete derivative - (F_i - F_{i-1}) / dx using the left periodic neighbor. This operator is the first-order finite-volume building block for the advection equation; it must conserve the cell average on a periodic grid and wrap q[-1] to the right boundary.
-The conservative form is q_t = - (F_i - F_{i-1}) / dx with F_i = a q_i. The sign of the velocity is carried by the flux, so the same periodic flux-difference formula is valid for positive and negative advection speeds.
+Build the sign-aware periodic upwind flux-difference operator for q_t + a q_x = 0. For constant velocity a, use the first-order upwind numerical flux at each interface: if a >= 0, use the left periodic neighbor at the interface; if a < 0, use the right periodic neighbor. Return the semi-discrete derivative - (F_right - F_left) / dx. This operator is the first-order finite-volume building block for advection; it must conserve the cell average on a periodic grid and wrap across both boundaries.
+The conservative form is q_t = - (F_right - F_left) / dx. A first-order upwind flux chooses the upstream side of each interface: left of the interface for positive velocity and right of the interface for negative velocity. The sign of the velocity therefore changes which periodic neighbor supplies the interface flux, while the periodic derivative still has zero mean.
 
 import numpy as np
 
@@ -19,7 +19,7 @@ return derivative
 
 DEPENDENCIES:
 Use only the following dependencies in your solution. Do not include these dependencies at the beginning of your code.
-numpy
+import numpy as np
 
 RESPONSE GUIDELINES:
 1. Start with the scientific background required for the next step, formatted as a comment.

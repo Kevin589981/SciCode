@@ -1,12 +1,27 @@
 PROBLEM DESCRIPTION:
-You will be provided with the main description of the problem, previous steps, and the next step. Your task will be to generate the disciplinary knowledge necessary for solving the next step and then develop a Python solution focused on this step.
+You will be provided with problem steps along with background knowledge necessary for solving the problem. Your task will be to develop a Python solution focused on the next step of the problem-solving process.
 
-PREVIOUS STEPS DESCRIPTION:
+PROBLEM STEPS AND FUNCTION CODE:
+Here, you'll find the Python code for the initial steps of the problem-solving process. This code is integral to building the solution.
+
 Build the sign-aware periodic upwind flux-difference operator for q_t + a q_x = 0. For constant velocity a, use the first-order upwind numerical flux at each interface: if a >= 0, use the left periodic neighbor at the interface; if a < 0, use the right periodic neighbor. Return the semi-discrete derivative - (F_right - F_left) / dx. This operator is the first-order finite-volume building block for advection; it must conserve the cell average on a periodic grid and wrap across both boundaries.
 The conservative form is q_t = - (F_right - F_left) / dx. A first-order upwind flux chooses the upstream side of each interface: left of the interface for positive velocity and right of the interface for negative velocity. The sign of the velocity therefore changes which periodic neighbor supplies the interface flux, while the periodic derivative still has zero mean.
 
-NEXT STEP - PROBLEM DESCRIPTION AND FUNCTION HEADER:
-This part will describe the next step in the problem-solving process. First, provide the necessary scientific background knowledge as a comment at the beginning of your response, starting with 'Background: '. Then, a function header will be provided, and your task is to develop the Python code for this next step based on the provided description and function header.
+
+def upwind_flux_difference(q: np.ndarray, velocity: float, dx: float) -> np.ndarray:
+    """Return the periodic first-order upwind derivative -d(a q)/dx for constant velocity."""
+
+    if velocity >= 0:
+        flux = velocity * q
+    else:
+        flux = velocity * np.roll(q, -1, axis=0)
+
+    derivative = -(flux - np.roll(flux, 1, axis=0)) / dx
+    return derivative
+
+
+NEXT STEP - PROBLEM STEP AND FUNCTION HEADER:
+This part will describe the next step in the problem-solving process. A function header will be provided, and your task is to develop the Python code for this next step based on the provided description and function header.
 
 Implement one periodic Lax-Wendroff update for q_t + a q_x = 0. First compute the sign-aware first-order derivative by calling upwind_flux_difference(q, velocity, dx). Then remove the first-order upwind numerical diffusion with the sign-aware anti-diffusive correction so the update is equivalent to q_new_i = q_i - 0.5*c*(q_{i+1} - q_{i-1}) + 0.5*c*c*(q_{i+1} - 2*q_i + q_{i-1}), where c = a dt / dx. Return a new array and do not mutate the input.
 The Lax-Wendroff scheme is the second-order finite-volume update used by the classic Clawpack advection solver when second-order time stepping is selected. Because the previous step supplies the sign-aware upwind derivative, the anti-diffusive correction must also respect the sign of the Courant number. Periodic wrap must be applied to both neighbors before the centered second derivative is formed.
@@ -20,18 +35,11 @@ return q_new
 
 DEPENDENCIES:
 Use only the following dependencies in your solution. Do not include these dependencies at the beginning of your code.
+
 import numpy as np
 
 RESPONSE GUIDELINES:
-1. Start with the scientific background required for the next step, formatted as a comment.
-2. Then write the complete and executable Python program for the next step in a single block.
-3. Your response should focus exclusively on implementing the solution for the next step, adhering closely to the specified function header and the context provided by the initial steps.
-4. DO NOT include previous function code, example usage or test code in your response.
-5. Ensure your response is in the format of ```python``` and includes the necessary background as a comment at the top.
-
-Example:
-```python
-# Background: [Here, insert the necessary scientific knowledge required for the next step.]
-
-[Insert the Python code here based on the provided function header and dependencies.]
-```
+Now, based on the instructions and information provided above, write the complete and executable Python program for the next step in a single block.
+Your response should focus exclusively on implementing the solution for the next step, adhering closely to the specified function header and the context provided by the initial steps.
+Your response should NOT include the dependencies and functions of all previous steps. If your next step function calls functions from previous steps, please make sure it uses the headers provided without modification.
+DO NOT generate EXAMPLE USAGE OR TEST CODE in your response. Please make sure your response python code in format of ```python```.

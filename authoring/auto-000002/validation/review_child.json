@@ -1,57 +1,50 @@
 {
+  "schema": "scicode-child-review-v1",
   "candidate_id": "auto-000002",
-  "revision": "r1",
-  "event_id": "kimi-code-child-public-review-auto-000002-r1",
-  "session_id": "agent-0",
-  "created_at": "2026-09-12T01:20:00Z",
-  "request": {
-    "reviewer": "kimi-code-child-public-review",
-    "scope": "public material only; no oracle, reference, private author notes, target files, or prior run traces",
-    "allowed_inputs": [
+  "revision": "r2",
+  "event_id": "review_child_auto-000002_r2_20260912T032006Z",
+  "requested_at": "2026-09-12T03:20:06Z",
+  "request": "Fresh public-only review of SciCode candidate auto-000002 revision r2 for scientific correctness, clarity, leakage, difficulty, visible source provenance, ordered subproblem dependencies, prompt protocol, and oracle independence.",
+  "response": {
+    "inspected_public_files": [
       "authoring/auto-000002/public/problem.jsonl",
       "authoring/auto-000002/public/README.md",
       "authoring/auto-000002/public/checks/public_invariants.py",
+      "authoring/auto-000002/public/solver_payload/public/README.md",
+      "authoring/auto-000002/public/solver_payload/source_notes/source_note.md",
+      "authoring/auto-000002/public/solver_payload/source_notes/pyclaw_classic_solver_excerpt.txt",
+      "authoring/auto-000002/public/solver_payload/source_notes/pyclaw_advection_1d.py",
+      "authoring/auto-000002/public/solver_payload/source_notes/provenance.json",
       "authoring/auto-000002/public/prompt_snapshot/with_background/auto-000002.1.txt",
       "authoring/auto-000002/public/prompt_snapshot/with_background/auto-000002.2.txt",
       "authoring/auto-000002/public/prompt_snapshot/with_background/auto-000002.3.txt",
-      "authoring/auto-000002/source_notes/provenance.json",
-      "authoring/auto-000002/candidate.json",
       "authoring/auto-000002/validation/schema_report.json",
       "authoring/auto-000002/validation/static_report.json",
-      "authoring/auto-000002/validation/oracle_report.json",
-      "authoring/auto-000002/validation/prompt_report.json",
-      "authoring/auto-000002/validation/isolation_report.json",
-      "authoring/auto-000002/validation/checks_report.json"
+      "authoring/auto-000002/validation/oracle_semantic_report.json",
+      "authoring/auto-000002/validation/leakage_report.json"
     ],
-    "validation_contract": [
-      "candidate must be based on a non-official external scientific source, not official SciCode tasks or eval/data/test_data.h5",
-      "canonical JSONL must preserve SciCode top-level fields and ordered sub_steps with function headers and public tests",
-      "prompt snapshots must match the upstream background prompt profile and must not leak private targets, reference, oracle, or evaluator intent",
-      "public solver payload must not expose private target values, reference code, oracle files, author notes, prior runs, or evaluator intent",
-      "scientific decomposition must form a real dependency chain with meaningful numerical/scientific concepts, units/shape conventions, boundary conditions, and checks",
-      "local validation reports must be ok, or failures must be blocking"
-    ]
+    "findings": {
+      "scientific_correctness": "The public contract describes a coherent one-dimensional periodic finite-volume advection workflow for q_t + a q_x = 0. Step 1 specifies the sign-aware first-order upwind numerical flux at each interface, with a >= 0 using the left periodic neighbor and a < 0 using the right periodic neighbor, and returns - (F_right - F_left) / dx. Step 2 gives the periodic Lax-Wendroff update with c = a dt / dx and requires the sign-aware anti-diffusive correction. Step 3 specifies exact periodic translation diagnostics and CFL/error metrics. Public invariant checks exercise positive and negative velocity upwind behavior and conservation.",
+      "sign_aware_upwind_flux": "Specified and tested for both signs. The step 1 prompt explicitly covers a >= 0 and a < 0, the step 1 public tests include positive velocity 1.5 and negative velocity -2.0 plus an additional positive velocity case, and public_invariants.py contains separate positive and negative velocity checks.",
+      "ordered_subproblem_dependencies": "The dependency chain is explicit: step 2 says to compute the sign-aware first-order derivative by calling upwind_flux_difference(q, velocity, dx); step 3 says to repeatedly call lax_wendroff_step. The parsed public problem confirms step2_calls_step1=True and step3_calls_step2=True.",
+      "clarity_and_difficulty": "The three ordered subproblems are clear and appropriately scoped for a finite-volume advection task. The task is not a syntax or toy arithmetic exercise; it requires periodic indexing, sign-aware flux semantics, conservation, Lax-Wendroff stability/accuracy behavior, and analytic error diagnostics.",
+      "public_prompt_protocol": "The public problem uses ordinary SciCode top-level fields: problem_name, problem_id, problem_description_main, problem_io, required_dependencies, sub_steps, general_tests, and problem_background_main. Each sub_step contains step_number, step_description_prompt, function_header, test_cases, return_line, and step_background. Prompt snapshots preserve the standard SciCode instruction/response format and do not add public solver tools.",
+      "source_provenance": "Visible public provenance names PyClaw as the source repository, pins commit f522337ef75abef1153e2025a204b7ef4f7c5c9f, lists BSD-3-Clause license, and cites DOI 10.1137/110829270. The public source note and retrieved fragments are limited to the advection example and classic second-order solver documentation.",
+      "leakage": "No private oracle arrays, target values, private reference code, or private diagnostics were visible in the public contract. Step 3 public tests use the standard target placeholder rather than embedded oracle values. The leakage report status is ok and reports private_material_visible_to_solver=false.",
+      "oracle_independence": "The oracle_semantic_report status is ok; reference and independent implementations pass all steps, and the wrong implementation fails step 1, which aligns with the intended sign-aware upwind distinction. Public checks and problem tests verify mathematical behavior without exposing private oracle data.",
+      "verification_performed": [
+        "Read all allowed public problem, README, solver payload, prompt snapshot, and validation report files.",
+        "Parsed the public problem JSONL to confirm required top-level and sub-step fields.",
+        "Confirmed step 2 calls the step 1 function and step 3 calls the step 2 function by prompt wording.",
+        "Ran public invariant checks with python3 -B; all passed."
+      ],
+      "minor_observations": [
+        "The public tests verify numerical outputs and invariants; the requirement that later functions call earlier functions is enforced by the prompt wording rather than by a public call-graph test."
+      ]
+    },
+    "issues": [],
+    "decision_rationale": "No public-only blockers were found. The sign-aware upwind flux is specified and tested for positive and negative velocities, later subproblems explicitly use earlier functions, the public prompt protocol remains ordinary SciCode, visible provenance is adequate, and the public leakage/oracle reports show no private material exposure."
   },
-  "response": {
-    "reviewer": "kimi-code-child-public-review",
-    "decision": "proceed",
-    "blocking_issues": [],
-    "non_blocking_notes": [
-      "Step 1 uses the term \"upwind\" even for negative velocity, while the required formula explicitly uses the left periodic neighbor; the formula and tests are unambiguous, so this is a terminology/clarity note rather than a blocking issue.",
-      "Step 3 public test cases reference hidden `target` values, so they are not self-contained public tests; this appears consistent with the SciCode target-injection style and the validation reports are ok."
-    ],
-    "public_evidence": [
-      "source_notes/provenance.json pins an external PyClaw source commit f522337ef75abef1153e2025a204b7ef4f7c5c9f, BSD-3-Clause license, paper DOI, and source fingerprints.",
-      "public/problem.jsonl contains the required SciCode top-level fields, numpy dependency, 3 ordered sub_steps, function headers, return lines, and test cases.",
-      "public/prompt_snapshot/with_background/auto-000002.{1,2,3}.txt show previous-step continuity for steps 1, 2, and 3 and no detected target/oracle/private/reference/author/evaluator leakage.",
-      "public/checks/public_invariants.py contains public invariant checks for conservation and expected flux-difference values without oracle values.",
-      "validation/schema_report.json reports status ok for 1 problem and 3 subproblems.",
-      "validation/static_report.json reports public checks, reference, and oracle validation all ok with no failures.",
-      "validation/oracle_report.json reports status ok for 3 steps and 9 tests.",
-      "validation/prompt_report.json, validation/isolation_report.json, and validation/checks_report.json all report ok."
-    ],
-    "recommended_next_action": "Proceed to strict AvaCore run."
-  },
-  "decision": "proceed",
-  "decision_reason": "Child review found no blocking scientific, clarity, provenance, leakage, or validation-contract issues in the public material."
+  "decision": "accepted_for_avacore_run",
+  "reviewer_note": "Accepted for AvaCore run; no public-only blockers found."
 }

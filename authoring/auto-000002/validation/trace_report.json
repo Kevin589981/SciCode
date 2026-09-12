@@ -1,12 +1,22 @@
 {
   "schema": "scicode-trace-audit-v1",
-  "status": "ok",
+  "status": "blocked",
   "candidate_id": "auto-000002",
-  "revision": "r1",
-  "rollout_rows": 1,
-  "expected_problem_rows": 1,
-  "complete_subproblems": 3,
-  "failures": [],
-  "warnings": [],
-  "rollouts_sha256": "9e02c4e6918a8bfa42af2d5a68a2481f87cffa84898d2a0bef1bb6a421e00515"
+  "revision": "r2",
+  "checked_rollouts": false,
+  "required_usage": false,
+  "reason": "AvaCore failed before rollouts/manifest; no complete trace available",
+  "failed_run_dirs": [
+    "authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-12",
+    "authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-13",
+    "authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-14"
+  ],
+  "notes": "Do not accept as complete; no rollouts.jsonl or manifest.json was produced for r2.",
+  "subproblem_audit": [],
+  "ordinary_content_present": false,
+  "reasoning_content_present": false,
+  "finish_reasons": {},
+  "code_extraction": {},
+  "evaluator_scores": {},
+  "usage": null
 }

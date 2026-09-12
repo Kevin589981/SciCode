@@ -15,18 +15,26 @@ def _right_periodic(values: np.ndarray) -> np.ndarray:
 
 def upwind_flux_difference(q: np.ndarray, velocity: float, dx: float) -> np.ndarray:
     q_arr = np.asarray(q, dtype=float)
-    return (velocity / float(dx)) * (_left_periodic(q_arr) - q_arr)
+    a = float(velocity)
+    if a >= 0.0:
+        return -a * (q_arr - _left_periodic(q_arr)) / float(dx)
+    return -a * (_right_periodic(q_arr) - q_arr) / float(dx)
 
 
 def lax_wendroff_step(q: np.ndarray, velocity: float, dx: float, dt: float) -> np.ndarray:
     q_arr = np.asarray(q, dtype=float)
     q_l = _left_periodic(q_arr)
     q_r = _right_periodic(q_arr)
+    laplacian = q_r - 2.0 * q_arr + q_l
     courant = float(velocity) * float(dt) / float(dx)
+    if courant >= 0.0:
+        anti_diffusion = -0.5 * courant * (1.0 - courant) * laplacian
+    else:
+        anti_diffusion = 0.5 * courant * (1.0 + courant) * laplacian
     return (
         q_arr
-        - 0.5 * courant * (q_r - q_l)
-        + 0.5 * courant * courant * (q_r - 2.0 * q_arr + q_l)
+        + float(dt) * upwind_flux_difference(q_arr, float(velocity), float(dx))
+        + anti_diffusion
     )
 
 

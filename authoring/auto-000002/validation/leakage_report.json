@@ -2,12 +2,11 @@
   "schema": "scicode-leakage-audit-v1",
   "status": "ok",
   "candidate_id": "auto-000002",
-  "revision": "r1",
-  "basis": "validation/isolation_report.json",
-  "basis_status": "ok",
+  "revision": "r2",
+  "basis": "public/ and public/solver_payload/ marker scan",
   "private_material_visible_to_solver": false,
   "notes": [
-    "run_candidate_checks isolation_report reported status ok",
-    "child review was limited to public material only and found no blocking leakage issue"
+    "public prompt snapshots and solver payload regenerated for r2",
+    "no private oracle/reference/target markers found"
   ]
 }

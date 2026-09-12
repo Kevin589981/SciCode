@@ -36,7 +36,7 @@ def save_group(handle: h5py.File, step_id: str, values: list[object]) -> None:
 def main() -> None:
     oracle = ROOT / "oracle"
     oracle.mkdir(parents=True, exist_ok=True)
-    targets = ROOT / "oracle" / "targets.h5"
+    targets = oracle / "targets.h5"
     with h5py.File(targets, "w") as handle:
         save_group(
             handle,

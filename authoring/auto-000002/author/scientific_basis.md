@@ -4,8 +4,8 @@ The candidate is derived from the PyClaw 1-D advection example and classic solve
 
 The candidate asks for a minimal NumPy implementation of that scientific workflow:
 
-1. A conservative periodic flux-difference operator for constant advective flux `F = a q`.
-2. A second-order Lax-Wendroff update using periodic left and right neighbors.
+1. A conservative periodic flux-difference operator that uses a sign-aware first-order upwind numerical flux. Positive velocity takes the left periodic neighbor at each interface; negative velocity takes the right periodic neighbor.
+2. A second-order Lax-Wendroff update that reuses the sign-aware upwind derivative and applies the matching sign-aware anti-diffusive correction.
 3. A full integration routine that compares the numerical periodic translation with the exact analytic translation and reports L1, max-norm, and CFL diagnostics.
 
-This is a numerical-methods task with unit/shape conventions, periodic boundary semantics, CFL reporting, and a known wrong implementation path: using non-periodic boundaries or first-order Euler stepping changes the scientific semantics and fails the oracle tests.
+This is a numerical-methods task with unit/shape conventions, periodic boundary semantics, CFL reporting, and a known wrong implementation path: using the fixed left-neighbor difference for negative velocity changes the scientific semantics and fails the oracle tests.

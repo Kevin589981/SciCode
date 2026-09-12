@@ -7,19 +7,21 @@ import numpy as np
 
 def upwind_flux_difference(q: np.ndarray, velocity: float, dx: float) -> np.ndarray:
     q_arr = np.asarray(q, dtype=float)
-    flux = velocity * q_arr
-    # Wrong: zero-gradient boundaries instead of periodic wrap.
-    left = flux.copy()
-    left[1:] = flux[:-1]
+    flux = float(velocity) * q_arr
+    # Wrong: fixed left-neighbor flux is not upwind when velocity is negative.
+    left = np.roll(flux, 1)
     return -(flux - left) / float(dx)
 
 
 def lax_wendroff_step(q: np.ndarray, velocity: float, dx: float, dt: float) -> np.ndarray:
     q_arr = np.asarray(q, dtype=float)
-    # Wrong: first-order upwind Euler, not Lax-Wendroff.
-    c = float(velocity) * float(dt) / float(dx)
+    right = np.roll(q_arr, -1)
     left = np.roll(q_arr, 1)
-    return q_arr - c * (q_arr - left)
+    laplacian = right - 2.0 * q_arr + left
+    # Wrong: applies the positive-velocity anti-diffusion correction for all signs.
+    courant = float(velocity) * float(dt) / float(dx)
+    anti_diffusion = -0.5 * courant * (1.0 - courant) * laplacian
+    return q_arr + float(dt) * upwind_flux_difference(q_arr, float(velocity), float(dx)) + anti_diffusion
 
 
 def integrate_periodic_advection(
