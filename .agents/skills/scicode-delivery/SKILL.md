@@ -10,8 +10,8 @@ Use this skill only after the candidate release gate passes.
 ## Validate and lock
 
 1. Re-run schema, static, oracle, provenance, leakage, prompt, and trace
-   checks. Run `scripts/check_trace.py` with `--require-usage` and reject
-   incomplete or privately mounted runs.
+   checks. Run `scripts/check_trace.py` with both `--require-usage` and
+   `--require-reasoning`, then reject incomplete or privately mounted runs.
 2. Acquire the delivery lock under the configured workspace root.
 3. Read the registry before writing. Deduplicate by candidate revision,
    problem id, step number, and trace hash.
@@ -30,7 +30,10 @@ python scripts/export_subproblem_samples.py \
   --target-count 10000
 ```
 
-Emit one SFT-compatible record for each complete non-skipped subproblem.
+Emit one SFT-compatible record for each complete non-skipped subproblem. Treat
+ordinary content, reasoning content, token usage, finish status, and code
+extraction as parts of the trace; do not export a record that lacks required
+reasoning or usage.
 Preserve `messages`, `completion`, `reasoning_content`,
 `completion_with_reasoning`, `parsed_code`, `context_code`,
 `provider_response`, `usage`, and `metadata`. Preserve candidate/source/run

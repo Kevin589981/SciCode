@@ -25,3 +25,16 @@ def test_trace_audit_rejects_missing_subproblem(tmp_path: Path):
     report = audit_rollouts(load_candidate(candidate), rollouts)
     assert report["status"] == "failed"
     assert any("count" in item["error"] for item in report["failures"])
+
+
+def test_trace_audit_requires_reasoning_for_formal_trace(tmp_path: Path):
+    candidate = make_candidate(tmp_path)
+    rollouts = make_rollout(candidate)
+    report = audit_rollouts(
+        load_candidate(candidate),
+        rollouts,
+        require_usage=True,
+        require_reasoning=True,
+    )
+    assert report["status"] == "failed"
+    assert any("reasoning content" in item["error"] for item in report["failures"])

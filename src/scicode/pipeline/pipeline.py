@@ -110,6 +110,7 @@ def run_candidate_pipeline(
             manifest,
             rollouts,
             require_usage=not allow_qa_export,
+            require_reasoning=not allow_qa_export,
         )
         result["trace_audit"] = trace_audit
         _write_json(root / "validation" / "trace_report.json", trace_audit)
