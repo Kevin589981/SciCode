@@ -43,7 +43,8 @@ shared framework code to rescue one candidate.
 5. Use the supplied worktree and candidate identifiers in every artifact.
    Do not invent a second candidate identity or overwrite another candidate.
 6. Route source retrieval according to the destination. Access domestic,
-   internal, and `.cn` services directly. For GitHub, arXiv, Hugging Face,
+   internal, and `.cn` services directly, including domestic search endpoints
+   used to locate scientific material. For GitHub, arXiv, Hugging Face,
    Docker Hub, and other externally hosted scientific sources, set
    `http_proxy`, `https_proxy`, `HTTP_PROXY`, and `HTTPS_PROXY` to
    `http://httpproxy-headless.kubebrain.svc.lg.shzhisuan.local:3128` for the
@@ -51,12 +52,18 @@ shared framework code to rescue one candidate.
 7. Preserve `no_proxy` and `NO_PROXY` entries for localhost, private network
    ranges, cluster-local services, internal model hosts, and domestic domains.
    Remove the temporary source proxy variables after retrieval when the shell
-   environment is reused for another operation.
-8. Read the supplied `BASE_URL`, `OPENAI_API_KEY`, and `POSTGRES` values only
-   through the solver-run skill. Use them for a skill-requested connectivity
-   check or solver handoff; never place their values in a prompt, source note,
-   trace, manifest, or commit. Keep solver and database traffic on the route
-   specified by the skill, not on an ad hoc source-download route.
+   environment is reused for another operation. Do not route an internal
+   solver request through the external-source proxy when its host is in
+   `NO_PROXY`.
+8. Read the injected `BASE_URL`, `MODEL` (or `KIMI_MODEL`),
+   `OPENAI_API_KEY` (or `API_KEY`), and `POSTGRES` values from the execution
+   environment when a solver skill or its requested connectivity check needs
+   them. Use `BASE_URL` as the OpenAI-compatible solver endpoint and use the
+   supplied model name for the solver; do not substitute the authoring-agent
+   model configuration. Use `POSTGRES` only for the requested trace/storage
+   handoff. Never place any of these values in a prompt, source note, trace,
+   manifest, generated data, or commit. Keep solver and database traffic on
+   the route specified by the skill, not on an ad hoc source-download route.
 
 ## 3. Research and design the scientific task
 
