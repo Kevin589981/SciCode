@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import sys
 
@@ -159,3 +160,129 @@ def test_child_env_promotes_solver_model_alias_before_removing_dynamic_name():
     env = runner._child_env(job)
     assert env["MODEL"] == "solver-alias"
     assert "KIMI_MODEL" not in env
+
+
+class FinishedProcess:
+    def __init__(self, code=0):
+        self.code = code
+
+    def poll(self):
+        return self.code
+
+
+class RunningProcess:
+    def poll(self):
+        return None
+
+
+def _write_handoff(path, run_id):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"run_id": run_id, "output_dir": str(path.parent), "export_path": str(path.parent / "rollouts.jsonl")}
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_reviewing_binds_new_handoff_after_process_finishes(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    r1 = candidate_dir / "runs" / "run-r1" / "handoff.json"
+    r2 = candidate_dir / "runs" / "run-r2" / "handoff.json"
+    _write_handoff(r1, "run-r1")
+    _write_handoff(r2, "run-r2")
+    job = Job(
+        candidate_id="auto-000001",
+        index=1,
+        worktree_path=str(worktree),
+        branch="author/auto-000001",
+        allocation_path=str(tmp_path / "allocation.json"),
+        job_root=str(tmp_path / "job"),
+        stage="reviewing",
+        round=2,
+        handoff_path=str(r1),
+        run_id="run-r1",
+        manifest_path=str(r1.parent / "manifest.json"),
+        rollouts_path=str(r1.parent / "rollouts.jsonl"),
+        pid=123,
+    )
+    runner = object.__new__(BatchRunner)
+    runner.processes = {job.candidate_id: RunningProcess()}
+    runner.log_streams = {}
+    runner.jobs = {job.candidate_id: job}
+    runner.config = BatchConfig(
+        repository_root=str(tmp_path / "repo"),
+        workspace_root=str(tmp_path / "workspace"),
+        delivery_root=str(tmp_path / "delivery"),
+        batch_root=str(tmp_path / "batches"),
+        max_rounds=6,
+    )
+    runner.batch_id = "batch-1"
+
+    runner._advance(job)
+
+    assert job.stage == "reviewing"
+    assert job.handoff_path == str(r1)
+    assert job.manifest_path == str(r1.parent / "manifest.json")
+
+    runner.processes[job.candidate_id] = FinishedProcess()
+    runner._advance(job)
+
+    assert job.stage == "waiting_solver"
+    assert job.handoff_path == str(r2)
+    assert job.run_id is None
+    assert job.manifest_path is None
+    assert job.rollouts_path is None
+
+
+def test_release_handoff_prefers_release_run_id(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    r1 = candidate_dir / "runs" / "run-r1" / "handoff.json"
+    r2 = candidate_dir / "runs" / "run-r2" / "handoff.json"
+    _write_handoff(r1, "run-r1")
+    _write_handoff(r2, "run-r2")
+    decision = candidate_dir / "validation" / "release_decision.json"
+    decision.parent.mkdir(parents=True, exist_ok=True)
+    decision.write_text(json.dumps({"run_id": "run-r1", "decision": "accepted"}), encoding="utf-8")
+    job = Job(
+        candidate_id="auto-000001",
+        index=1,
+        worktree_path=str(worktree),
+        branch="author/auto-000001",
+        allocation_path=str(tmp_path / "allocation.json"),
+        job_root=str(tmp_path / "job"),
+    )
+    runner = object.__new__(BatchRunner)
+    assert runner._release_handoff(job) == r1
+
+
+def test_bind_run_artifacts_rejects_manifest_from_prior_revision(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    candidate_dir.mkdir(parents=True)
+    (candidate_dir / "candidate_manifest.json").write_text(
+        json.dumps({"visible_contract_sha256": "current"}), encoding="utf-8"
+    )
+    handoff = candidate_dir / "runs" / "run-r1" / "handoff.json"
+    _write_handoff(handoff, "run-r1")
+    (handoff.parent / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-r1",
+                "candidate": {"visible_contract_sha256": "prior"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    job = Job(
+        candidate_id="auto-000001",
+        index=1,
+        worktree_path=str(worktree),
+        branch="author/auto-000001",
+        allocation_path=str(tmp_path / "allocation.json"),
+        job_root=str(tmp_path / "job"),
+    )
+    runner = object.__new__(BatchRunner)
+    assert runner._bind_run_artifacts(job, handoff) is False

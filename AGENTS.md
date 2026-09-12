@@ -188,11 +188,23 @@ requires a rerun or explicit rejection. Treat `finish_reason=length` at the
 deployment limit as a valid trace when all available content, reasoning, usage,
 and termination metadata are preserved.
 
-Inspect every ordered subproblem separately. Check prompt continuity, code
-extraction, syntax, scientific reasoning, finish state, retries, token counts,
-and evaluator result. Keep solver-answer correctness separate from trace
-completeness: a wrong answer is a valid trace-quality observation, but it does
-not prove that the candidate is scientifically acceptable.
+Inspect every ordered subproblem separately. First run the dependency-free
+detail reader and read its bounded report:
+
+```bash
+python3 scripts/inspect_trace.py \
+  --candidate-dir "$CANDIDATE_DIR" \
+  --rollouts "$CANDIDATE_DIR/runs/$RUN_ID/rollouts.jsonl" \
+  --output "$CANDIDATE_DIR/validation/trace_details.json" \
+  --max-text-chars 8000
+```
+
+Use that report to check prompt continuity, code extraction, syntax, scientific
+reasoning, finish state, retries, token counts, and evaluator result. Do not
+import `scicode.gen.models` or call a provider merely to read a trace. Keep
+solver-answer correctness separate from trace completeness: a wrong answer is
+a valid trace-quality observation, but it does not prove that the candidate is
+scientifically acceptable.
 
 ## 9. Revise with evidence
 

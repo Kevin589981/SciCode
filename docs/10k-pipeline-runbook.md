@@ -74,6 +74,16 @@ Resume the same Kimi Code session with the handoff and exported trace paths:
 kimi -r SESSION_ID -p "Read runs/RUN_ID/handoff.json and runs/RUN_ID/manifest.json. Inspect the complete rollouts.jsonl per subproblem, classify trace and task-quality findings, and continue the revision or delivery procedure in AGENTS.md."
 ```
 
+Read each completed subproblem without importing provider dependencies:
+
+```bash
+python3 scripts/inspect_trace.py \
+  --candidate-dir "$CANDIDATE_DIR" \
+  --rollouts "$CANDIDATE_DIR/runs/$RUN_ID/rollouts.jsonl" \
+  --output "$CANDIDATE_DIR/validation/trace_details.json" \
+  --max-text-chars 8000
+```
+
 ## Deliver samples
 
 After Kimi Code records a passing release decision, invoke the delivery skill

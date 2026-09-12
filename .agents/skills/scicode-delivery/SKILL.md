@@ -11,7 +11,19 @@ Use this skill only after the candidate release gate passes.
 
 1. Re-run schema, static, oracle, provenance, leakage, prompt, and trace
    checks. Run `scripts/check_trace.py` with both `--require-usage` and
-   `--require-reasoning`, then reject incomplete or privately mounted runs.
+   `--require-reasoning`, then run the dependency-free detail reader:
+
+   ```bash
+   python3 scripts/inspect_trace.py \
+     --candidate-dir "$CANDIDATE_DIR" \
+     --rollouts "$CANDIDATE_DIR/runs/$RUN_ID/rollouts.jsonl" \
+     --output "$CANDIDATE_DIR/validation/trace_details.json" \
+     --max-text-chars 8000
+   ```
+
+   Read the generated report for every subproblem. Do not import
+   `scicode.gen.models` or call a provider to inspect a completed trace. Then
+   reject incomplete or privately mounted runs.
 2. Acquire the delivery lock under the configured workspace root.
 3. Read the registry before writing. Deduplicate by candidate revision,
    problem id, step number, and trace hash.

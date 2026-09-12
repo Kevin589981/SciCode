@@ -593,6 +593,83 @@ candidate artifacts before declaring the candidate complete. Do not push.
             return None
         return max(paths, key=lambda path: path.stat().st_mtime_ns)
 
+    def _handoff_for_run(self, job: Job, run_id: str | None) -> Path | None:
+        """Find the handoff whose recorded run id matches ``run_id``."""
+        if not run_id or not job.candidate_dir.is_dir():
+            return None
+        for path in job.candidate_dir.glob("runs/*/handoff.json"):
+            try:
+                value = read_json(path)
+            except (OSError, ValueError):
+                continue
+            if str(value.get("run_id", "")) == str(run_id):
+                return path
+        return None
+
+    def _release_handoff(self, job: Job) -> Path | None:
+        """Prefer the run named by the release decision, then the newest run."""
+        decision = job.candidate_dir / "validation" / "release_decision.json"
+        if decision.is_file():
+            try:
+                value = read_json(decision)
+            except (OSError, ValueError):
+                value = {}
+            run_id = str(value.get("run_id", ""))
+            if run_id:
+                # An explicit release run is an integrity assertion.  Do not
+                # silently fall back to a newer or older run when it is absent.
+                return self._handoff_for_run(job, run_id)
+        return self._latest_handoff(job)
+
+    def _bind_handoff(self, job: Job, handoff: Path) -> None:
+        """Bind a new solver run and clear artifacts from the previous run."""
+        job.handoff_path = str(handoff)
+        job.run_id = None
+        job.manifest_path = None
+        job.rollouts_path = None
+        job.solver_started_at = now()
+        job.updated_at = now()
+
+    def _bind_run_artifacts(self, job: Job, handoff: Path) -> bool:
+        """Attach the manifest/export belonging to exactly one handoff."""
+        manifest, export, run_id = self._manifest_for(handoff)
+        if manifest is None or not run_id:
+            return False
+        try:
+            run_value = read_json(manifest)
+            run_candidate = run_value.get("candidate")
+            current_candidate = read_json(job.candidate_dir / "candidate_manifest.json")
+        except (OSError, ValueError):
+            return False
+        if isinstance(run_candidate, Mapping):
+            current_hash = current_candidate.get("visible_contract_sha256")
+            run_hash = run_candidate.get("visible_contract_sha256")
+            if current_hash and run_hash and current_hash != run_hash:
+                return False
+        recorded_run_id = run_value.get("run_id")
+        if recorded_run_id and str(recorded_run_id) != str(run_id):
+            return False
+        job.handoff_path = str(handoff)
+        job.manifest_path = str(manifest)
+        job.rollouts_path = str(export) if export else None
+        job.run_id = run_id
+        job.updated_at = now()
+        return True
+
+    def _refresh_run_artifacts(self, job: Job, *, prefer_release: bool = False) -> bool:
+        """Refresh paths before delivery so a revision cannot use an old run."""
+        if prefer_release:
+            handoff = self._release_handoff(job)
+        elif job.handoff_path and Path(job.handoff_path).is_file():
+            handoff = Path(job.handoff_path)
+        else:
+            handoff = self._latest_handoff(job)
+        if handoff is None:
+            return False
+        if str(handoff) != job.handoff_path:
+            self._bind_handoff(job, handoff)
+        return self._bind_run_artifacts(job, handoff)
+
     def _manifest_for(self, handoff: Path) -> tuple[Path | None, Path | None, str | None]:
         try:
             value = read_json(handoff)
@@ -753,10 +830,6 @@ candidate artifacts before declaring the candidate complete. Do not push.
         process_finished = self._finish_process(job)
         handoff = self._latest_handoff(job)
         handoff_is_new = handoff is not None and str(handoff) != job.handoff_path
-        if handoff is not None and str(handoff) != job.handoff_path:
-            job.handoff_path = str(handoff)
-            job.solver_started_at = now()
-            job.updated_at = now()
 
         if job.stage == "authoring":
             if not process_finished:
@@ -765,10 +838,14 @@ candidate artifacts before declaring the candidate complete. Do not push.
                 self._fail(job, f"authoring process exited with code {job.last_exit_code} before handoff")
                 return
             if handoff is not None:
+                self._bind_handoff(job, handoff)
                 job.stage = "waiting_solver"
                 job.updated_at = now()
                 return
             if self._release_accepted(job):
+                if not self._refresh_run_artifacts(job, prefer_release=True):
+                    self._fail(job, "release decision has no matching run manifest")
+                    return
                 job.stage = "delivery"
                 self._deliver(job)
                 return
@@ -786,10 +863,17 @@ candidate artifacts before declaring the candidate complete. Do not push.
             if not process_finished:
                 return
             if handoff_is_new:
+                # A new handoff may have appeared while the reviewer was still
+                # running.  Bind it only after that process exits, and clear
+                # all paths that belonged to the prior revision.
+                self._bind_handoff(job, handoff)
                 job.stage = "waiting_solver"
                 job.updated_at = now()
                 return
             if self._release_accepted(job):
+                if not self._refresh_run_artifacts(job, prefer_release=True):
+                    self._fail(job, "release decision has no matching run manifest")
+                    return
                 job.stage = "delivery"
                 self._deliver(job)
                 return
@@ -809,19 +893,20 @@ candidate artifacts before declaring the candidate complete. Do not push.
         if job.stage == "waiting_solver":
             if not process_finished and job.pid:
                 return
-            if handoff is None:
+            if handoff is not None and handoff_is_new:
+                # Recover a handoff that was written before a controller
+                # restart or before the previous polling cycle persisted it.
+                self._bind_handoff(job, handoff)
+            if not job.handoff_path:
                 self._fail(job, "solver handoff disappeared")
                 return
-            manifest, export, run_id = self._manifest_for(handoff)
-            if manifest is None:
+            bound_handoff = Path(job.handoff_path)
+            if not self._bind_run_artifacts(job, bound_handoff):
                 if job.solver_started_at:
                     started = datetime.fromisoformat(job.solver_started_at).timestamp()
                     if time.time() - started > self.config.run_timeout_seconds:
                         self._fail(job, "solver run exceeded controller timeout without a manifest")
                 return
-            job.manifest_path = str(manifest)
-            job.rollouts_path = str(export) if export else None
-            job.run_id = run_id
             if job.round < self.config.max_rounds:
                 self._launch(job, resume=True)
             else:
@@ -829,6 +914,9 @@ candidate artifacts before declaring the candidate complete. Do not push.
             return
 
         if job.stage == "delivery":
+            if not self._refresh_run_artifacts(job, prefer_release=True):
+                self._fail(job, "delivery has no matching run manifest")
+                return
             self._deliver(job)
 
     def _active_jobs(self) -> list[Job]:
