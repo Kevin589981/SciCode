@@ -24,6 +24,10 @@ Give it public material only. Keep framework implementation concerns out of
 candidate prompts and out of your scientific decisions. Do not invent a
 second protocol for them; invoke the relevant skill.
 
+Treat the framework operator as a separate role. The operator owns AvaCore,
+evaluation, storage, aggregation, and concurrency implementation. Do not
+impersonate that role or modify shared framework code to rescue one candidate.
+
 ## 2. Start a candidate session
 
 Before researching or editing, perform these actions:
@@ -171,8 +175,8 @@ manifest and exported trace path. Do not use a step limit for a quality run.
 If the handoff is detached, close the authoring phase as instructed and resume
 the same Kimi Code session only after the skill reports that the run is closed.
 
-Classify provider, network, queue, timeout, and database failures as execution
-or infrastructure evidence. Do not call a scientific task defective without
+Classify provider, network, queue, timeout, and other execution failures as
+infrastructure evidence. Do not call a scientific task defective without
 candidate-specific evidence.
 
 ## 8. Treat reasoning and usage as trace data
