@@ -423,15 +423,11 @@ class BatchRunner:
         env["SCICODE_BATCH_ID"] = self.batch_id
         env["SCICODE_CANDIDATE_ID"] = job.candidate_id
         env["SCICODE_CANDIDATE_DIR"] = str(job.candidate_dir)
-        # Provider profiles commonly use these aliases.  Do not print them or
-        # write their values into the batch state.
+        # Keep solver credentials in the child environment without setting
+        # KIMI_MODEL_* overrides: Kimi Code treats those names as a dynamic
+        # model definition and would bypass the configured model alias.
         if env.get("API_KEY"):
             env.setdefault("OPENAI_API_KEY", env["API_KEY"])
-            env.setdefault("KIMI_MODEL_API_KEY", env["API_KEY"])
-        if env.get("BASE_URL"):
-            env.setdefault("KIMI_MODEL_BASE_URL", env["BASE_URL"])
-        if env.get("MODEL"):
-            env.setdefault("KIMI_MODEL_NAME", env["MODEL"])
         return env
 
     def _author_prompt(self, job: Job, *, resume: bool, reason: str | None = None) -> str:
