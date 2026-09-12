@@ -75,6 +75,15 @@ adapter sends an effective `max_tokens` cap of 256,000 so input plus output
 stays below the provider context boundary; record both requested and effective
 values in the manifest.
 
+For a run to be returned as complete, require every subproblem trace to retain
+ordinary assistant content, provider reasoning content, code-extraction status,
+finish status, and token usage. Require `prompt_tokens`, `completion_tokens`,
+`reasoning_tokens`, and `total_tokens` when the provider exposes usage. Treat
+reasoning and usage as trace data, not disposable annotations. A missing
+reasoning field or required usage makes the trace incomplete and requires a
+rerun or an explicit incomplete classification. Preserve all available fields
+for a `finish_reason=length` trace.
+
 ## Return
 
 Write `runs/$RUN_ID/manifest.json` containing candidate/revision hashes,
