@@ -1,17 +1,17 @@
 {
   "schema": "scicode-release-decision-v1",
-  "status": "blocked_not_accepted",
+  "status": "accepted",
   "candidate_id": "auto-000002",
   "revision": "r2",
   "mode": "strict",
   "prompt_profile": "background",
   "strict_protocol": true,
-  "promotable": false,
-  "trace_complete": false,
-  "sample_count": 0,
-  "completed_subproblems": 0,
+  "promotable": true,
+  "trace_complete": true,
+  "sample_count": 1,
+  "completed_subproblems": 3,
   "expected_subproblems": 3,
-  "run_id": "auto-000002-r2-nex-strict-20260912-14",
+  "run_id": "auto-000002-r2-nex-strict-20260912-15",
   "solver_model": "nex-agi/Nex-N2-Pro",
   "solver_profile": "/root/scicode-authoring/.env-nex",
   "avacore_runner_path": "/root/scicode-authoring/candidates/auto-000002-r2/eval/avacore/scicode_avacore.py",
@@ -24,17 +24,29 @@
   "hashes": {
     "canonical_record_sha256": "bc57d915a8012b50ff362938b925cf1317bd04c41b4a3fd16252b2aa9cde6ce1",
     "visible_contract_sha256": "fbe2fd6b678c7e3b5e3ce1b3dc0785c2d936a57967b541780fd086ebb66ef0be",
-    "solver_payload_sha256": "22d7067da603c17f899a4b191cd77d17763b02e902926966b09323ae1ae48971",
+    "solver_payload_sha256": "2dbe7bc7a026c8222e9d1f28dd64b9020600f123c53f6a475fda18fe367c376d",
     "oracle_sha256": "cda442c576499e994a5adb75dd0e101a478328728a7fb840244a8547d8a294d7",
     "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35"
   },
-  "trace_hashes": {},
-  "usage": null,
+  "trace_hashes": {
+    "export_sha256": "8d1299cf78419155f5a5614be6ba9a3eca109f2ebfb583069f998640f9333ae1",
+    "audit_sha256": "86579c76730dec62f49723f8d1f35530d80189f68b9b0eb86b4f8cfb1a7b12d5"
+  },
+  "usage": {
+    "prompt_tokens": 2787,
+    "completion_tokens": 7867,
+    "reasoning_tokens": 7202,
+    "cached_tokens": 0,
+    "total_tokens": 10654
+  },
   "evaluator_status": {
-    "promotable": false,
-    "score": null,
+    "promotable": true,
+    "score": 0.3333333333333333,
     "score_metric": "subproblem_correctness",
-    "notes": "No successful evaluator result was available because AvaCore failed before producing rollouts or a manifest."
+    "problem_correctness": 0.0,
+    "total_correct": 1,
+    "total_steps": 3,
+    "notes": "AvaCore evaluator completed normally. One subproblem passed and two failed as solver results; no extraction, dependency, or NameError failure occurred."
   },
   "validation_reports": {
     "schema": "ok",
@@ -43,7 +55,7 @@
     "prompt": "ok",
     "isolation": "ok",
     "leakage": "ok",
-    "trace": "blocked",
+    "trace": "ok",
     "checks": "ok"
   },
   "child_review": {
@@ -71,16 +83,36 @@
       "log": "Set POSTGRES or pass --postgres; AvaCore PostgreSQL is the primary trace store"
     }
   ],
+  "successful_run": {
+    "run_id": "auto-000002-r2-nex-strict-20260912-15",
+    "manifest": "authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-15/manifest.json",
+    "trace": "authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-15/rollouts.jsonl",
+    "status": "finished",
+    "errors": 0,
+    "completed_subproblems": 3,
+    "score": 0.3333333333333333,
+    "score_metric": "subproblem_correctness",
+    "effective_max_tokens": 256000,
+    "timeout": 7200,
+    "http_retries": 5,
+    "concurrency": 1,
+    "ordinary_content_present": true,
+    "reasoning_content_present": true,
+    "finish_reasons": ["stop", "stop", "stop"],
+    "usage_present": true
+  },
   "failure_separation": {
     "candidate_errors": [
       "r1 bare required_dependencies string was rejected and fixed in r2 to an executable import declaration.",
       "r1 fixed left-neighbor difference was rejected and fixed in r2 to a sign-aware upwind flux with positive and negative velocity tests."
     ],
-    "solver_errors": [],
+    "solver_errors": [
+      "Run 15 completed but the Nex solver passed only 1 of 3 subproblems; this is retained as valid QA trace evidence."
+    ],
     "infrastructure_errors": [
       "Runs 12 and 14 stopped because POSTGRES was not available in the shell.",
-      "Run 13 used the wrong base URL and then failed during AvaCore PostgreSQL instance creation."
+      "Run 13 used the wrong base URL and then failed during AvaCore PostgreSQL instance creation; the runner now uses a candidate-hash-qualified storage query id and the wrapper explicitly passes POSTGRES through the child environment."
     ]
   },
-  "acceptance_reason": "Local schema/static/oracle/prompt/leakage/isolation/checks gates and the public-only child review pass, but r2 is blocked/not accepted because the strict AvaCore run failed before producing a manifest, rollouts, evaluator scores, finish reasons, code extraction, ordinary content, reasoning content, or usage metadata."
+  "acceptance_reason": "Local schema/static/oracle/prompt/leakage/isolation/checks gates, public-only child review, and successful strict AvaCore run 15 all pass. The candidate has a complete three-subproblem trace with ordinary content, reasoning content, stop finish reasons, provider usage, and normal evaluator output. The 1/3 solver score is recorded as QA evidence and is not treated as a candidate validity failure."
 }

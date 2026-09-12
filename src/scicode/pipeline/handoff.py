@@ -92,6 +92,7 @@ def submit_avacore(
     concurrency: int = 1,
     run_id: str | None = None,
     env: dict[str, str] | None = None,
+    postgres: str | None = None,
 ) -> dict[str, Any]:
     """Validate and launch one detached strict AvaCore process."""
     candidate = load_candidate(candidate_dir)
@@ -119,6 +120,10 @@ def submit_avacore(
     child_env = os.environ.copy()
     if env:
         child_env.update(env)
+    if postgres:
+        # Pass the DSN only through the child environment; never serialize it
+        # into the handoff manifest or command audit record.
+        child_env["POSTGRES"] = postgres
     # The detached child runs from the AvaCore environment, which may not have
     # this checkout installed as a package.  Carry the repository source path
     # explicitly so nested candidates work from a clean clone as well.

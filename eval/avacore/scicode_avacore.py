@@ -42,6 +42,7 @@ from scicode.pipeline.run_manifest import build_run_manifest, write_json_atomic
 
 _OFFICIAL_CWD = Path(__file__).parents[1] / "inspect_ai"
 _OFFICIAL_LOCK = asyncio.Lock()
+_NEX_MAX_OUTPUT_TOKENS = 256_000
 
 
 def _endpoint_base_url(base_url: str) -> str:
@@ -166,11 +167,22 @@ def _sanitize_message_for_nex(message: ChatMessage) -> dict[str, Any]:
 
 
 def _sanitize_sampling_params_for_nex(sampling_params: dict[str, Any]) -> dict[str, Any]:
+    requested = sampling_params.get("max_tokens")
+    if requested is None:
+        requested = sampling_params.get("max_completion_tokens")
     sanitized = dict(sampling_params)
-    sanitized.pop("max_tokens", None)
     sanitized.pop("max_completion_tokens", None)
     sanitized.pop("reasoning_effort", None)
     sanitized.pop("chat_template_kwargs", None)
+    if requested is not None:
+        try:
+            requested_int = int(requested)
+        except (TypeError, ValueError):
+            requested_int = 0
+        if requested_int > 0:
+            sanitized["max_tokens"] = min(requested_int, _NEX_MAX_OUTPUT_TOKENS)
+        else:
+            sanitized.pop("max_tokens", None)
     return sanitized
 
 
@@ -179,13 +191,39 @@ def _sanitize_payload_for_nex(payload: dict[str, Any]) -> tuple[dict[str, Any], 
     sanitized["messages"] = [_sanitize_message_for_nex(message) for message in payload["messages"]]
     sanitized.pop("tools", None)
     sanitized.pop("tool_choice", None)
-    removed_fields = {"tools", "tool_choice", "max_tokens", "max_completion_tokens"} & set(payload)
+    removed_fields = {
+        "tools",
+        "tool_choice",
+        "max_completion_tokens",
+        "reasoning_effort",
+        "chat_template_kwargs",
+    } & set(payload)
     metadata = {
         "nex_request_compatibility": True,
         "sanitized_sampling_params": _sanitize_sampling_params_for_nex(payload),
         "removed_request_fields": sorted(removed_fields),
+        "nex_requested_max_tokens": payload.get(
+            "max_tokens", payload.get("max_completion_tokens")
+        ),
+        "nex_effective_max_tokens": sanitized.get("max_tokens"),
     }
     return sanitized, metadata
+
+
+def _storage_query_id(
+    problem_id: Any,
+    *,
+    candidate: CandidateManifest | None,
+    run_name: str,
+) -> str:
+    """Keep PostgreSQL instance keys unique without changing solver-visible ids."""
+    problem_id = str(problem_id)
+    if candidate is not None:
+        return (
+            f"{candidate.candidate_id}::{candidate.revision}::"
+            f"{candidate.canonical_record_sha256[:16]}::{problem_id}"
+        )
+    return f"{run_name}::{problem_id}"
 
 
 def _redact_nex_log_text(text: str, authorization_header: str) -> str:
@@ -573,6 +611,11 @@ async def run(args: argparse.Namespace) -> None:
     ]
     run_name = args.run_name or datetime.now(timezone.utc).strftime("scicode-%Y%m%dT%H%M%SZ")
     expected_subproblems = sum(len(_active_steps(row)) for row in rows)
+    query_id_strategy = (
+        "candidate_revision_hash::problem_id"
+        if candidate is not None
+        else "run_name::problem_id"
+    )
     run_config = {
         "split": args.split,
         "problem_file": str(Path(args.problem_file).resolve()) if args.problem_file else None,
@@ -591,6 +634,7 @@ async def run(args: argparse.Namespace) -> None:
         "max_steps": args.max_steps,
         "nex_request_compatibility": bool(nex_request_metadata),
         "nex_sanitized_sampling_params": nex_request_metadata,
+        "storage_query_id_strategy": query_id_strategy,
     }
     if candidate is not None:
         run_config["candidate_id"] = candidate.candidate_id
@@ -628,7 +672,11 @@ async def run(args: argparse.Namespace) -> None:
             )
             async with engine:
                 async for outcome in engine.run_pairs(pairs, stream_rollout=False):
-                    query_id = str(outcome.instance["id"])
+                    query_id = _storage_query_id(
+                        outcome.instance["id"],
+                        candidate=candidate,
+                        run_name=run_name,
+                    )
                     if isinstance(outcome, RolloutError):
                         errors += 1
                         await stored_run.create_errored_rollout(
