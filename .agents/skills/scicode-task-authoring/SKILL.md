@@ -8,6 +8,12 @@ description: Create and quality-gate one scientifically difficult strict SciCode
 Use this skill for every candidate revision. Follow the commands in
 `AGENTS.md`; this skill exposes the short operational sequence.
 
+Run repository scripts with the explicit `SCICODE_PYTHON` interpreter prepared
+by the execution environment. When no supplied interpreter is available, set
+`UV_BIN="${UV_BIN:-/root/.local/bin/uv}"`, run `"$UV_BIN" venv --python 3.12
+.venv` and `"$UV_BIN" pip install --python .venv/bin/python -e .`, then set
+`SCICODE_PYTHON="$PWD/.venv/bin/python"`.
+
 ## Create
 
 1. Research an external scientific source and pin its URL, commit, license,
@@ -17,7 +23,7 @@ Use this skill for every candidate revision. Follow the commands in
    the upstream model-visible prompt fields and do not use official SciCode
    records or `test_data.h5`.
 3. Write private reference, independent, and wrong implementations. Run
-   `python authoring/$CANDIDATE_ID/oracle/generate_targets.py` to generate the
+   `"$SCICODE_PYTHON" authoring/$CANDIDATE_ID/oracle/generate_targets.py` to generate the
    candidate HDF5 oracle when it is absent, then record its hash. Keep the HDF5
    file private and never use the official `test_data.h5`.
 4. Derive the redacted solver payload and public checks from an allowlist.
@@ -28,7 +34,7 @@ Use this skill for every candidate revision. Follow the commands in
 Run:
 
 ```bash
-python scripts/validate_candidate.py \
+"$SCICODE_PYTHON" scripts/validate_candidate.py \
   --candidate-dir authoring/$CANDIDATE_ID \
   --write-report authoring/$CANDIDATE_ID/validation/schema_report.json
 ```

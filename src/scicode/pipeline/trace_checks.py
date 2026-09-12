@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .candidate import CandidateManifest, read_jsonl
+from .trace_format import split_reasoning
 
 
 def _messages(value: Any) -> list[Mapping[str, Any]]:
@@ -102,8 +103,8 @@ def audit_rollouts(
                     }
                 )
                 continue
-            content = _text(assistant.get("content"))
-            reasoning = _text(
+            content, reasoning = split_reasoning(
+                assistant.get("content"),
                 assistant.get("reasoning_content") or assistant.get("reasoning")
             )
             if not content and not reasoning:

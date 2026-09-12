@@ -19,7 +19,7 @@ Use this skill before creating or editing a candidate.
 4. Run:
 
    ```bash
-   python scripts/worktree.py create \
+"$SCICODE_PYTHON" scripts/worktree.py create \
      --repository "$REPOSITORY_ROOT" \
      --workspace-root "$WORKSPACE_ROOT" \
      --candidate-id "$CANDIDATE_ID" \
@@ -39,7 +39,7 @@ Use this skill before creating or editing a candidate.
 
 ## Cleanup
 
-Run `python scripts/worktree.py cleanup-copy ...` only after a successful merge
+Run `"$SCICODE_PYTHON" scripts/worktree.py cleanup-copy ...` only after a successful merge
 or a recorded rejection. Do not delete the branch or Git history. Preserve the
 candidate manifest and rejection record.
 

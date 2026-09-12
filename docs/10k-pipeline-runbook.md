@@ -36,6 +36,23 @@ Do not put API keys in shell history, candidate files, or trace manifests. Keep
 `POSTGRES`, `OPENAI_API_KEY`, and any provider-specific key in the yicloud
 environment that launches AvaCore.
 
+Before running repository scripts, select an explicit Python environment. Do not
+assume that the shell provides a `python` executable:
+
+```bash
+export SCICODE_PYTHON=/root/scicode-avacore/AvaCore/.venv/bin/python
+```
+
+When that environment is unavailable, create a project environment with `uv`:
+
+```bash
+cd /root/scicode-authoring/repository
+export UV_BIN="${UV_BIN:-/root/.local/bin/uv}"
+"$UV_BIN" venv --python 3.12 .venv
+"$UV_BIN" pip install --python .venv/bin/python -e .
+export SCICODE_PYTHON="$PWD/.venv/bin/python"
+```
+
 ## Start Kimi Code authoring
 
 Run Kimi Code from the repository checkout. Give it one candidate id and tell
@@ -56,7 +73,7 @@ The AvaCore skill submits a detached process and writes
 `candidate/runs/<run_id>/handoff.json`. Poll it with:
 
 ```bash
-python scripts/avacore_run_status.py \
+"$SCICODE_PYTHON" scripts/avacore_run_status.py \
   /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/cand-000001-r1/handoff.json
 ```
 
@@ -77,7 +94,7 @@ kimi -r SESSION_ID -p "Read runs/RUN_ID/handoff.json and runs/RUN_ID/manifest.js
 Read each completed subproblem without importing provider dependencies:
 
 ```bash
-python3 scripts/inspect_trace.py \
+"$SCICODE_PYTHON" scripts/inspect_trace.py \
   --candidate-dir "$CANDIDATE_DIR" \
   --rollouts "$CANDIDATE_DIR/runs/$RUN_ID/rollouts.jsonl" \
   --output "$CANDIDATE_DIR/validation/trace_details.json" \
@@ -90,7 +107,7 @@ After Kimi Code records a passing release decision, invoke the delivery skill
 or run its deterministic wrapper:
 
 ```bash
-python scripts/run_candidate_pipeline.py \
+"$SCICODE_PYTHON" scripts/run_candidate_pipeline.py \
   --candidate-dir /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001 \
   --delivery-root /root/scicode-authoring/delivery \
   --rollouts /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/rollouts.jsonl \
@@ -110,7 +127,7 @@ Check the handoff log, run manifest, and database run independently:
 ```bash
 tail -n 100 /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/avacore.log
 cat /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/manifest.json
-python scripts/avacore_run_status.py /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/handoff.json
+"$SCICODE_PYTHON" scripts/avacore_run_status.py /root/scicode-authoring/candidates/cand-000001/authoring/cand-000001/runs/RUN_ID/handoff.json
 ```
 
 Classify provider/network/queue/database errors as infrastructure. Classify a

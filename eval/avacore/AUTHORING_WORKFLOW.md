@@ -35,13 +35,20 @@ clone, rebuild it from the checked-in reference implementation before running
 validation:
 
 ```bash
-python authoring/CANDIDATE_ID/oracle/generate_targets.py
+"$SCICODE_PYTHON" authoring/CANDIDATE_ID/oracle/generate_targets.py
 ```
 
 The generator is the only source of candidate targets; do not download or use
 the official SciCode `test_data.h5`.
 
 ## Strict AvaCore run
+
+Set `SCICODE_PYTHON` to the repository interpreter before running repository
+scripts. Use the supplied AvaCore environment. If it is unavailable, set
+`UV_BIN="${UV_BIN:-/root/.local/bin/uv}"`, run `"$UV_BIN" venv --python 3.12
+.venv` and `"$UV_BIN" pip install --python .venv/bin/python -e .`, then set
+`SCICODE_PYTHON="$PWD/.venv/bin/python"`; do not rely on a system `python`
+alias.
 
 Use the candidate-aware runner:
 
@@ -86,7 +93,7 @@ dataset.
 Run the delivery skill after the release decision:
 
 ```bash
-python scripts/export_subproblem_samples.py \
+"$SCICODE_PYTHON" scripts/export_subproblem_samples.py \
   --candidate-dir /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID \
   --rollouts /root/scicode-authoring/candidates/CANDIDATE_ID/authoring/CANDIDATE_ID/runs/RUN_ID/rollouts.jsonl \
   --registry /root/scicode-authoring/delivery/registry.jsonl \

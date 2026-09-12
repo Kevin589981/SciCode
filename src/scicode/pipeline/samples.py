@@ -5,12 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .candidate import CandidateManifest, load_candidate
+from .trace_format import (
+    extract_code,
+    normalize_content as _normalize_content,
+    split_reasoning,
+)
 
 
 class SampleExportError(ValueError):
@@ -18,14 +22,6 @@ class SampleExportError(ValueError):
 
 
 SKIPPED_SUBSTEPS = frozenset({("13", 5), ("62", 0), ("76", 2)})
-_FENCE = re.compile(
-    r"```(?:python|py)?[ \t]*\r?\n?(.*?)```", re.IGNORECASE | re.DOTALL
-)
-_THINK = re.compile(r"<think>\s*(.*?)\s*</think>\s*", re.IGNORECASE | re.DOTALL)
-_IMPORT_LINE = re.compile(
-    r"^\s*(?:import\s+.+|from\s+.+\s+import\s+.+)\s*(?:\r?\n|$)",
-    re.MULTILINE,
-)
 
 
 def _json_hash(value: Any) -> str:
@@ -33,41 +29,6 @@ def _json_hash(value: Any) -> str:
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
-
-
-def _normalize_content(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        parts: list[str] = []
-        for item in value:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, Mapping):
-                for key in ("text", "content", "value"):
-                    if isinstance(item.get(key), str):
-                        parts.append(item[key])
-                        break
-        return "".join(parts)
-    if value is None:
-        return ""
-    return str(value)
-
-
-def extract_code(content: str) -> str:
-    """Mirror SciCode's code extraction without importing provider libraries."""
-    if not content:
-        return ""
-    match = _FENCE.search(content)
-    code = match.group(1) if match else content
-    # SciCode supplies dependencies separately; preserve the same stripped
-    # code representation used by the SFT generator.
-    while True:
-        updated = _IMPORT_LINE.sub("", code, count=1)
-        if updated == code:
-            break
-        code = updated
-    return code.strip()
 
 
 def _message_list(value: Any) -> list[dict[str, Any]]:
@@ -162,16 +123,11 @@ def _expand_rollout(
                 f"subproblem trace lacks user/assistant messages: {problem_id}/{step.get('step_number')}"
             )
         prompt = _normalize_content(user_message.get("content"))
-        content = _normalize_content(assistant_message.get("content"))
-        reasoning = _normalize_content(
+        content, reasoning = split_reasoning(
+            assistant_message.get("content"),
             assistant_message.get("reasoning_content")
             or assistant_message.get("reasoning")
         )
-        if not reasoning:
-            thinking = _THINK.search(content)
-            if thinking:
-                reasoning = thinking.group(1).strip()
-                content = content[thinking.end() :]
         if not content and not reasoning:
             raise SampleExportError(
                 f"subproblem trace has no model output: {problem_id}/{step.get('step_number')}"

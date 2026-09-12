@@ -192,6 +192,7 @@ class Job:
     manifest_path: str | None = None
     rollouts_path: str | None = None
     solver_started_at: str | None = None
+    release_wait_started_at: str | None = None
     last_exit_code: int | None = None
     accepted_samples: int = 0
     delivery: dict[str, Any] | None = None
@@ -423,6 +424,9 @@ class BatchRunner:
         env["SCICODE_BATCH_ID"] = self.batch_id
         env["SCICODE_CANDIDATE_ID"] = job.candidate_id
         env["SCICODE_CANDIDATE_DIR"] = str(job.candidate_dir)
+        # Skills use one explicit interpreter; inherit the controller's tested
+        # environment unless the operator supplied a different one.
+        env.setdefault("SCICODE_PYTHON", sys.executable)
         # Keep solver credentials and routing in the child environment without
         # allowing Kimi Code's dynamic KIMI_MODEL_* variables to override its
         # isolated config.toml. KIMI_MODEL is accepted only as a solver-model
@@ -595,31 +599,30 @@ candidate artifacts before declaring the candidate complete. Do not push.
 
     def _handoff_for_run(self, job: Job, run_id: str | None) -> Path | None:
         """Find the handoff whose recorded run id matches ``run_id``."""
-        if not run_id or not job.candidate_dir.is_dir():
+        if not isinstance(run_id, str) or not run_id.strip() or not job.candidate_dir.is_dir():
             return None
         for path in job.candidate_dir.glob("runs/*/handoff.json"):
             try:
                 value = read_json(path)
             except (OSError, ValueError):
                 continue
-            if str(value.get("run_id", "")) == str(run_id):
+            if value.get("run_id") == run_id:
                 return path
         return None
 
     def _release_handoff(self, job: Job) -> Path | None:
-        """Prefer the run named by the release decision, then the newest run."""
+        """Resolve only the run explicitly named by an accepted release decision."""
         decision = job.candidate_dir / "validation" / "release_decision.json"
         if decision.is_file():
             try:
                 value = read_json(decision)
             except (OSError, ValueError):
                 value = {}
-            run_id = str(value.get("run_id", ""))
-            if run_id:
-                # An explicit release run is an integrity assertion.  Do not
-                # silently fall back to a newer or older run when it is absent.
+            decision = str(value.get("status", value.get("decision", ""))).lower()
+            run_id = value.get("run_id")
+            if decision in {"accepted", "approved", "accepted_for_delivery"}:
                 return self._handoff_for_run(job, run_id)
-        return self._latest_handoff(job)
+        return None
 
     def _bind_handoff(self, job: Job, handoff: Path) -> None:
         """Bind a new solver run and clear artifacts from the previous run."""
@@ -628,12 +631,24 @@ candidate artifacts before declaring the candidate complete. Do not push.
         job.manifest_path = None
         job.rollouts_path = None
         job.solver_started_at = now()
+        job.release_wait_started_at = None
         job.updated_at = now()
 
     def _bind_run_artifacts(self, job: Job, handoff: Path) -> bool:
         """Attach the manifest/export belonging to exactly one handoff."""
         manifest, export, run_id = self._manifest_for(handoff)
-        if manifest is None or not run_id:
+        if manifest is None or export is None or not isinstance(run_id, str) or not run_id.strip():
+            return False
+        try:
+            candidate_root = job.candidate_dir.resolve()
+            runs_root = (candidate_root / "runs").resolve()
+            manifest_root = manifest.resolve().parent
+            export_path = export.resolve()
+            if not manifest_root.is_relative_to(runs_root):
+                return False
+            if manifest_root.name != run_id or not export_path.is_relative_to(manifest_root):
+                return False
+        except OSError:
             return False
         try:
             run_value = read_json(manifest)
@@ -641,13 +656,36 @@ candidate artifacts before declaring the candidate complete. Do not push.
             current_candidate = read_json(job.candidate_dir / "candidate_manifest.json")
         except (OSError, ValueError):
             return False
-        if isinstance(run_candidate, Mapping):
-            current_hash = current_candidate.get("visible_contract_sha256")
-            run_hash = run_candidate.get("visible_contract_sha256")
-            if current_hash and run_hash and current_hash != run_hash:
-                return False
-        recorded_run_id = run_value.get("run_id")
-        if recorded_run_id and str(recorded_run_id) != str(run_id):
+        if not isinstance(run_candidate, Mapping):
+            return False
+        identity_fields = (
+            "candidate_id",
+            "revision",
+            "canonical_record_sha256",
+            "visible_contract_sha256",
+            "solver_payload_sha256",
+            "oracle_sha256",
+            "provenance_sha256",
+        )
+        if any(
+            not current_candidate.get(field)
+            or not run_candidate.get(field)
+            or current_candidate.get(field) != run_candidate.get(field)
+            for field in identity_fields
+        ):
+            return False
+        if run_value.get("mode") != "strict":
+            return False
+        if run_value.get("status") != "finished":
+            return False
+        if run_value.get("run_id") != run_id:
+            return False
+        if run_candidate.get("candidate_id") != job.candidate_id:
+            return False
+        if run_candidate.get("revision") != current_candidate.get("revision"):
+            return False
+        recorded_root = run_candidate.get("root")
+        if recorded_root and Path(str(recorded_root)).resolve() != candidate_root:
             return False
         job.handoff_path = str(handoff)
         job.manifest_path = str(manifest)
@@ -682,7 +720,10 @@ candidate artifacts before declaring the candidate complete. Do not push.
         manifest = output_dir / "manifest.json"
         export_value = value.get("export_path") or (output_dir / "rollouts.jsonl")
         export = Path(str(export_value))
-        return (manifest if manifest.is_file() else None, export, str(value.get("run_id")))
+        raw_run_id = value.get("run_id")
+        if not isinstance(raw_run_id, str) or not raw_run_id.strip():
+            return None, None, None
+        return (manifest if manifest.is_file() else None, export, raw_run_id)
 
     def _release_accepted(self, job: Job) -> bool:
         path = job.candidate_dir / "validation" / "release_decision.json"
@@ -697,6 +738,22 @@ candidate artifacts before declaring the candidate complete. Do not push.
             "approved",
             "accepted_for_delivery",
         }
+
+    def _release_artifacts_ready(self, job: Job) -> bool:
+        """Wait for the explicitly released run instead of selecting a neighbor."""
+        if self._refresh_run_artifacts(job, prefer_release=True) and self._trace_ready(job):
+            job.release_wait_started_at = None
+            job.error = None
+            return True
+        if job.release_wait_started_at is None:
+            job.release_wait_started_at = now()
+            job.error = "release decision is waiting for its matching complete trace"
+            job.updated_at = now()
+            return False
+        started = datetime.fromisoformat(job.release_wait_started_at).timestamp()
+        if time.time() - started > self.config.run_timeout_seconds:
+            self._fail(job, "release decision has no matching complete run trace before timeout")
+        return False
 
     def _trace_ready(self, job: Job) -> bool:
         if not job.manifest_path or not job.rollouts_path:
@@ -734,8 +791,9 @@ candidate artifacts before declaring the candidate complete. Do not push.
             return
         try:
             delivery_root = Path(self.config.delivery_root)
+            env = self._child_env(job)
             command = [
-                sys.executable,
+                env.get("SCICODE_PYTHON", sys.executable),
                 str(Path(self.config.repository_root) / "scripts" / "run_candidate_pipeline.py"),
                 "--candidate-dir",
                 str(job.candidate_dir),
@@ -748,7 +806,6 @@ candidate artifacts before declaring the candidate complete. Do not push.
                 "--target-count",
                 str(self.config.target_samples),
             ]
-            env = self._child_env(job)
             env["PYTHONPATH"] = os.pathsep.join(
                 part
                 for part in (str(Path(self.config.repository_root) / "src"), env.get("PYTHONPATH", ""))
@@ -785,7 +842,7 @@ candidate artifacts before declaring the candidate complete. Do not push.
 
     def _merge(self, job: Job) -> None:
         command = [
-            sys.executable,
+            self.base_env.get("SCICODE_PYTHON", sys.executable),
             str(Path(self.config.repository_root) / "scripts" / "merge_candidate.py"),
             "--repository",
             self.config.repository_root,
@@ -843,8 +900,7 @@ candidate artifacts before declaring the candidate complete. Do not push.
                 job.updated_at = now()
                 return
             if self._release_accepted(job):
-                if not self._refresh_run_artifacts(job, prefer_release=True):
-                    self._fail(job, "release decision has no matching run manifest")
+                if not self._release_artifacts_ready(job):
                     return
                 job.stage = "delivery"
                 self._deliver(job)
@@ -871,8 +927,7 @@ candidate artifacts before declaring the candidate complete. Do not push.
                 job.updated_at = now()
                 return
             if self._release_accepted(job):
-                if not self._refresh_run_artifacts(job, prefer_release=True):
-                    self._fail(job, "release decision has no matching run manifest")
+                if not self._release_artifacts_ready(job):
                     return
                 job.stage = "delivery"
                 self._deliver(job)
@@ -907,6 +962,12 @@ candidate artifacts before declaring the candidate complete. Do not push.
                     if time.time() - started > self.config.run_timeout_seconds:
                         self._fail(job, "solver run exceeded controller timeout without a manifest")
                 return
+            if not self._trace_ready(job):
+                if job.solver_started_at:
+                    started = datetime.fromisoformat(job.solver_started_at).timestamp()
+                    if time.time() - started > self.config.run_timeout_seconds:
+                        self._fail(job, "solver run exceeded controller timeout before trace completion")
+                return
             if job.round < self.config.max_rounds:
                 self._launch(job, resume=True)
             else:
@@ -914,8 +975,7 @@ candidate artifacts before declaring the candidate complete. Do not push.
             return
 
         if job.stage == "delivery":
-            if not self._refresh_run_artifacts(job, prefer_release=True):
-                self._fail(job, "delivery has no matching run manifest")
+            if not self._release_artifacts_ready(job):
                 return
             self._deliver(job)
 

@@ -7,6 +7,28 @@ description: Validate, merge, and aggregate complete strict SciCode subproblem t
 
 Use this skill only after the candidate release gate passes.
 
+## Runtime
+
+Set `SCICODE_PYTHON` before running any repository command. Prefer the
+already-installed AvaCore environment when it contains the SciCode checkout:
+
+```bash
+export SCICODE_PYTHON=/root/scicode-avacore/AvaCore/.venv/bin/python
+```
+
+For a clean SciCode-only environment, create it with `uv` and install the
+checkout into that environment; do not rely on a system `python` alias:
+
+```bash
+export UV_BIN="${UV_BIN:-/root/.local/bin/uv}"
+"$UV_BIN" venv --python 3.12 .venv
+"$UV_BIN" pip install --python .venv/bin/python -e .
+export SCICODE_PYTHON="$PWD/.venv/bin/python"
+```
+
+Use `"$SCICODE_PYTHON"` for every `scripts/*.py` command below. Use the
+AvaCore interpreter only for the AvaCore runner itself.
+
 ## Validate and lock
 
 1. Re-run schema, static, oracle, provenance, leakage, prompt, and trace
@@ -14,7 +36,7 @@ Use this skill only after the candidate release gate passes.
    `--require-reasoning`, then run the dependency-free detail reader:
 
    ```bash
-   python3 scripts/inspect_trace.py \
+   "$SCICODE_PYTHON" scripts/inspect_trace.py \
      --candidate-dir "$CANDIDATE_DIR" \
      --rollouts "$CANDIDATE_DIR/runs/$RUN_ID/rollouts.jsonl" \
      --output "$CANDIDATE_DIR/validation/trace_details.json" \
@@ -33,7 +55,7 @@ Use this skill only after the candidate release gate passes.
 Run:
 
 ```bash
-python scripts/export_subproblem_samples.py \
+"$SCICODE_PYTHON" scripts/export_subproblem_samples.py \
   --candidate-dir "$CANDIDATE_DIR" \
   --rollouts "$CANDIDATE_DIR/runs/$RUN_ID/rollouts.jsonl" \
   --registry "$DELIVERY_ROOT/registry.jsonl" \

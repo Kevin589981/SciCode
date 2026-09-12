@@ -137,6 +137,7 @@ def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
     assert "KIMI_MODEL_BASE_URL" not in env
     assert not any(name.startswith("KIMI_MODEL_") for name in env)
     assert env["SCICODE_CANDIDATE_ID"] == "auto-000001"
+    assert env["SCICODE_PYTHON"] == sys.executable
 
 
 def test_child_env_promotes_solver_model_alias_before_removing_dynamic_name():
@@ -183,6 +184,52 @@ def _write_handoff(path, run_id):
         ),
         encoding="utf-8",
     )
+
+
+def _write_candidate_manifest(path, *, revision="r1", oracle="oracle"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "candidate_id": "auto-000001",
+                "revision": revision,
+                "canonical_record_sha256": "record",
+                "visible_contract_sha256": "visible",
+                "solver_payload_sha256": "payload",
+                "oracle_sha256": oracle,
+                "provenance_sha256": "provenance",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_complete_run(candidate_dir, run_id="run-r1", *, oracle="oracle"):
+    run = candidate_dir / "runs" / run_id
+    run.mkdir(parents=True, exist_ok=True)
+    _write_handoff(run / "handoff.json", run_id)
+    (run / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "status": "finished",
+                "mode": "strict",
+                "candidate": {
+                    "candidate_id": "auto-000001",
+                    "revision": "r1",
+                    "canonical_record_sha256": "record",
+                    "visible_contract_sha256": "visible",
+                    "solver_payload_sha256": "payload",
+                    "oracle_sha256": oracle,
+                    "provenance_sha256": "provenance",
+                    "root": str(candidate_dir),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run / "rollouts.jsonl").write_text("{}\n", encoding="utf-8")
+    return run / "handoff.json"
 
 
 def test_reviewing_binds_new_handoff_after_process_finishes(tmp_path):
@@ -286,3 +333,92 @@ def test_bind_run_artifacts_rejects_manifest_from_prior_revision(tmp_path):
     )
     runner = object.__new__(BatchRunner)
     assert runner._bind_run_artifacts(job, handoff) is False
+
+
+def test_bind_run_artifacts_rejects_missing_run_id(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    _write_candidate_manifest(candidate_dir / "candidate_manifest.json")
+    run = candidate_dir / "runs" / "run-r1"
+    run.mkdir(parents=True)
+    (run / "handoff.json").write_text(
+        json.dumps({"output_dir": str(run), "export_path": str(run / "rollouts.jsonl")}),
+        encoding="utf-8",
+    )
+    (run / "manifest.json").write_text(json.dumps({"status": "finished"}), encoding="utf-8")
+    job = Job("auto-000001", 1, str(worktree), "branch", "", str(tmp_path / "job"))
+    runner = object.__new__(BatchRunner)
+    assert runner._bind_run_artifacts(job, run / "handoff.json") is False
+
+
+def test_bind_run_artifacts_rejects_private_hash_mismatch(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    _write_candidate_manifest(candidate_dir / "candidate_manifest.json", oracle="new")
+    handoff = _write_complete_run(candidate_dir, oracle="old")
+    job = Job("auto-000001", 1, str(worktree), "branch", "", str(tmp_path / "job"))
+    runner = object.__new__(BatchRunner)
+    assert runner._bind_run_artifacts(job, handoff) is False
+
+
+def test_bind_run_artifacts_rejects_malformed_candidate_mapping(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    _write_candidate_manifest(candidate_dir / "candidate_manifest.json")
+    handoff = _write_complete_run(candidate_dir)
+    (handoff.parent / "manifest.json").write_text(
+        json.dumps({"run_id": "run-r1", "candidate": ["not", "a", "mapping"]}),
+        encoding="utf-8",
+    )
+    job = Job("auto-000001", 1, str(worktree), "branch", "", str(tmp_path / "job"))
+    runner = object.__new__(BatchRunner)
+    assert runner._bind_run_artifacts(job, handoff) is False
+
+
+def test_bind_run_artifacts_rejects_non_strict_or_unfinished_run(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    _write_candidate_manifest(candidate_dir / "candidate_manifest.json")
+    handoff = _write_complete_run(candidate_dir)
+    value = json.loads((handoff.parent / "manifest.json").read_text(encoding="utf-8"))
+    value["mode"] = "agentic"
+    value["status"] = "failed"
+    (handoff.parent / "manifest.json").write_text(json.dumps(value), encoding="utf-8")
+    job = Job("auto-000001", 1, str(worktree), "branch", "", str(tmp_path / "job"))
+    runner = object.__new__(BatchRunner)
+    assert runner._bind_run_artifacts(job, handoff) is False
+
+
+def test_release_handoff_does_not_fallback_without_run_id(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    handoff = _write_complete_run(candidate_dir)
+    decision = candidate_dir / "validation" / "release_decision.json"
+    decision.parent.mkdir(parents=True)
+    decision.write_text(json.dumps({"decision": "accepted"}), encoding="utf-8")
+    job = Job("auto-000001", 1, str(worktree), "branch", "", str(tmp_path / "job"))
+    runner = object.__new__(BatchRunner)
+    assert runner._release_handoff(job) is None
+
+
+def test_release_waits_for_complete_trace_after_manifest_appears(tmp_path):
+    worktree = tmp_path / "worktree"
+    candidate_dir = worktree / "authoring" / "auto-000001"
+    _write_candidate_manifest(candidate_dir / "candidate_manifest.json")
+    handoff = _write_complete_run(candidate_dir)
+    decision = candidate_dir / "validation" / "release_decision.json"
+    decision.parent.mkdir(parents=True, exist_ok=True)
+    decision.write_text(
+        json.dumps({"run_id": "run-r1", "decision": "accepted"}), encoding="utf-8"
+    )
+    job = Job("auto-000001", 1, str(worktree), "branch", "", str(tmp_path / "job"))
+    runner = object.__new__(BatchRunner)
+    runner.config = BatchConfig(
+        repository_root=str(tmp_path / "repo"),
+        workspace_root=str(tmp_path / "workspace"),
+        delivery_root=str(tmp_path / "delivery"),
+        batch_root=str(tmp_path / "batches"),
+    )
+    assert runner._release_artifacts_ready(job) is False
+    assert job.stage == "authoring"
+    assert "complete trace" in (job.error or "")

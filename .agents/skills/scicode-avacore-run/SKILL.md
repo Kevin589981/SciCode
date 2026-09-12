@@ -8,6 +8,18 @@ description: Run one complete strict SciCode candidate through AvaCore and retur
 Use this skill as the only solver handoff. Kimi Code is the caller; Kimi is the
 model called inside AvaCore.
 
+Use the explicit repository interpreter exported as `SCICODE_PYTHON`. Set it to
+the AvaCore environment or to a project environment created with the explicit
+`UV_BIN` command and `uv pip install -e .`; never assume an unqualified
+`python` command exists. When a project environment is needed, run:
+
+```bash
+export UV_BIN="${UV_BIN:-/root/.local/bin/uv}"
+"$UV_BIN" venv --python 3.12 .venv
+"$UV_BIN" pip install --python .venv/bin/python -e .
+export SCICODE_PYTHON="$PWD/.venv/bin/python"
+```
+
 ## Required inputs
 
 Require these paths and settings from the candidate manifest:
@@ -32,7 +44,7 @@ Do not make Kimi Code wait inside the authoring session and do not make it
 construct an AvaCore command. Submit a detached run through the wrapper:
 
 ```bash
-python scripts/submit_avacore_run.py \
+"$SCICODE_PYTHON" scripts/submit_avacore_run.py \
   --candidate-dir "$CANDIDATE_DIR" \
   --avacore-python /root/scicode-avacore/AvaCore/.venv/bin/python \
   --runner /root/scicode-authoring/repository/eval/avacore/scicode_avacore.py \
@@ -58,7 +70,7 @@ quality review."`.
 Poll without contacting the model:
 
 ```bash
-python scripts/avacore_run_status.py "$CANDIDATE_DIR/runs/$RUN_ID/handoff.json"
+"$SCICODE_PYTHON" scripts/avacore_run_status.py "$CANDIDATE_DIR/runs/$RUN_ID/handoff.json"
 ```
 
 Do not pass `--max-steps` for a quality or formal run. Do not add tools,

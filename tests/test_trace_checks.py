@@ -38,3 +38,24 @@ def test_trace_audit_requires_reasoning_for_formal_trace(tmp_path: Path):
     )
     assert report["status"] == "failed"
     assert any("reasoning content" in item["error"] for item in report["failures"])
+
+
+def test_trace_audit_accepts_reasoning_embedded_in_content(tmp_path: Path):
+    candidate = make_candidate(tmp_path)
+    rollouts = make_rollout(candidate)
+    value = json.loads(rollouts.read_text(encoding="utf-8"))
+    for index, trace in enumerate(value["subtraces"]):
+        assistant = trace[-1]
+        assistant["content"] = (
+            f"<think>derive step {index}</think>\n"
+            + assistant["content"]
+        )
+        assistant.pop("reasoning_content", None)
+    rollouts.write_text(json.dumps(value) + "\n", encoding="utf-8")
+    report = audit_rollouts(
+        load_candidate(candidate),
+        rollouts,
+        require_usage=True,
+        require_reasoning=True,
+    )
+    assert report["status"] == "ok"

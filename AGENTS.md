@@ -27,6 +27,14 @@ Consume execution, storage, aggregation, and run settings through the provided
 skills. Do not inspect, reconfigure, or replace those settings. Do not modify
 shared framework code to rescue one candidate.
 
+Use an explicit project interpreter for every repository Python command. Set
+`SCICODE_PYTHON` to the supplied AvaCore environment. If it is unavailable,
+set `UV_BIN="${UV_BIN:-/root/.local/bin/uv}"`, create a local environment with
+`"$UV_BIN" venv --python 3.12 .venv`, install the checkout with
+`"$UV_BIN" pip install --python .venv/bin/python -e .`, and set
+`SCICODE_PYTHON="$PWD/.venv/bin/python"`. Never depend on an unqualified
+`python` command being present.
+
 ## 2. Start a candidate session
 
 1. Read `README.md`, the files under `eval/data/`,
@@ -192,7 +200,7 @@ Inspect every ordered subproblem separately. First run the dependency-free
 detail reader and read its bounded report:
 
 ```bash
-python3 scripts/inspect_trace.py \
+"$SCICODE_PYTHON" scripts/inspect_trace.py \
   --candidate-dir "$CANDIDATE_DIR" \
   --rollouts "$CANDIDATE_DIR/runs/$RUN_ID/rollouts.jsonl" \
   --output "$CANDIDATE_DIR/validation/trace_details.json" \
