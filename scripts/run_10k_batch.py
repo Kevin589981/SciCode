@@ -457,6 +457,13 @@ Create a genuinely difficult strict SciCode candidate from an allowed external
 scientific source. Keep private oracle/reference material private and never
 use official SciCode tasks or official test data.
 
+Use tools immediately and execute the next required action; do not spend a
+turn repeating a plan or describing work that has not happened. Read bounded
+file slices and targeted searches instead of dumping a repository, lockfile,
+or generated trace into the context. After each inspection, create or update
+the next required artifact and run its smallest relevant check. Keep narrative
+responses concise so the context remains available for tool results.
+
 Complete the public-only child review, local checks, and AvaCore handoff. When
 the solver run is pending, finish the current authoring turn after recording
 the handoff artifacts; do not call the provider directly and do not edit the
