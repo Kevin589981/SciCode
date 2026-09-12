@@ -1,0 +1,4 @@
+Fragment retrieved from clawpack/pyclaw at commit f522337ef75abef1153e2025a204b7ef4f7c5c9f:
+src/pyclaw/classic/solver.py documents the classic Clawpack solver order:
+"Order of the solver, either 1 for first order (i.e., Godunov's method) or 2 for second order (Lax-Wendroff-LeVeque). Default = 2".
+The candidate uses the second-order periodic Lax-Wendroff update for smooth linear advection.

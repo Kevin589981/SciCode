@@ -1,0 +1,67 @@
+{
+  "schema": "scicode-candidate-checks-v1",
+  "status": "ok",
+  "candidate": {
+    "candidate_id": "auto-000002",
+    "revision": "r1",
+    "root": "/root/scicode-authoring/candidates/auto-000002/authoring/auto-000002",
+    "problem_file": "/root/scicode-authoring/candidates/auto-000002/authoring/auto-000002/public/problem.jsonl",
+    "oracle_file": "/root/scicode-authoring/candidates/auto-000002/authoring/auto-000002/oracle/targets.h5",
+    "problem_count": 1,
+    "subproblem_count": 3,
+    "canonical_record_sha256": "7d889c4336916c1dc96c571a7473d8f37f4a988d5bc6fa675532980b60d2823a",
+    "visible_contract_sha256": "5c8a9dd400f42b1588a22f7a69fcf82b1cf2b460309329072f8f3fb7b2604e4c",
+    "solver_payload_sha256": "09c46919a00e07c7048bef26b12224ebdfa8b612468ec0060968c02ee8d1dd22",
+    "oracle_sha256": "6ee7732c484c6433b1210eae70661f5942813d1cec3174f67dc73c954d36bb85",
+    "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35",
+    "prompt_profile": "background",
+    "mode": "strict",
+    "created_at": "2026-09-12T02:48:47.434576+00:00",
+    "source_url": "https://raw.githubusercontent.com/clawpack/pyclaw/master/examples/advection_1d/advection_1d.py",
+    "source_commit": "f522337ef75abef1153e2025a204b7ef4f7c5c9f",
+    "license": "BSD-3-Clause",
+    "paper_url": "https://epubs.siam.org/doi/10.1137/110829270",
+    "paper_doi": "10.1137/110829270",
+    "source_fingerprint": "advection_1d.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:2b7a0f535c19da98d8c9c401d963ee3b6562a5381e8db33510cd5f1e65a6fdc4; classic/solver.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:a1e890b919f300726d2556aeef5724b0bbc7c063b48bb5744104c8e74d3bf0e2"
+  },
+  "schema_report": {
+    "status": "ok",
+    "problem_count": 1,
+    "subproblem_count": 3,
+    "visible_contract_sha256": "5c8a9dd400f42b1588a22f7a69fcf82b1cf2b460309329072f8f3fb7b2604e4c"
+  },
+  "oracle_report": {
+    "status": "ok",
+    "steps": 3,
+    "tests": 9
+  },
+  "static_report": {
+    "status": "ok",
+    "parts": {
+      "public_checks": {
+        "status": "ok",
+        "checked": 1,
+        "failures": []
+      },
+      "reference": {
+        "status": "ok",
+        "checked": 3,
+        "failures": []
+      },
+      "oracle": {
+        "status": "ok",
+        "checked": 2,
+        "failures": []
+      }
+    },
+    "failures": []
+  },
+  "prompt_report": {
+    "status": "ok",
+    "files": 3,
+    "expected_at_least": 3
+  },
+  "isolation_report": {
+    "status": "ok"
+  }
+}

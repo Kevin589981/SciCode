@@ -118,6 +118,85 @@ def _aggregate_usage(steps: list[dict[str, Any]], traces: list[ChatTrace]) -> di
     }
 
 
+def _is_nex_model(model: str) -> bool:
+    return model.lower().startswith("nex-agi/")
+
+
+def _content_to_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, Mapping):
+                if isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+                elif isinstance(item.get("content"), str):
+                    parts.append(item["content"])
+            elif isinstance(item, str):
+                parts.append(item)
+        if parts:
+            return "\n".join(parts)
+    try:
+        return json.dumps(content, ensure_ascii=False)
+    except TypeError:
+        return str(content)
+
+
+def _sanitize_message_for_nex(message: ChatMessage) -> dict[str, Any]:
+    if isinstance(message, Mapping):
+        raw = dict(message)
+    elif hasattr(message, "to_dict"):
+        raw = message.to_dict()
+    else:
+        raw = json.loads(str(message))
+    role = raw.get("role")
+    sanitized: dict[str, Any] = {"role": role, "content": _content_to_text(raw.get("content"))}
+    if role == "tool":
+        tool_call_id = raw.get("tool_call_id")
+        if tool_call_id is not None:
+            sanitized["tool_call_id"] = tool_call_id
+    elif role == "assistant":
+        tool_calls = raw.get("tool_calls")
+        if tool_calls:
+            sanitized["tool_calls"] = tool_calls
+    return sanitized
+
+
+def _sanitize_sampling_params_for_nex(sampling_params: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(sampling_params)
+    sanitized.pop("max_tokens", None)
+    sanitized.pop("max_completion_tokens", None)
+    sanitized.pop("reasoning_effort", None)
+    sanitized.pop("chat_template_kwargs", None)
+    return sanitized
+
+
+def _sanitize_payload_for_nex(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    sanitized = _sanitize_sampling_params_for_nex(dict(payload))
+    sanitized["messages"] = [_sanitize_message_for_nex(message) for message in payload["messages"]]
+    sanitized.pop("tools", None)
+    sanitized.pop("tool_choice", None)
+    removed_fields = {"tools", "tool_choice", "max_tokens", "max_completion_tokens"} & set(payload)
+    metadata = {
+        "nex_request_compatibility": True,
+        "sanitized_sampling_params": _sanitize_sampling_params_for_nex(payload),
+        "removed_request_fields": sorted(removed_fields),
+    }
+    return sanitized, metadata
+
+
+def _redact_nex_log_text(text: str, authorization_header: str) -> str:
+    redacted = text
+    if authorization_header:
+        redacted = redacted.replace(authorization_header, "<redacted>")
+    if authorization_header.startswith("Bearer "):
+        redacted = redacted.replace(authorization_header[7:], "<redacted>")
+    return redacted[:4000]
+
+
 class TraceOpenAIClient(OpenAIClient):
     """OpenAI client that retains provider usage in each assistant message.
 
@@ -135,11 +214,37 @@ class TraceOpenAIClient(OpenAIClient):
             **sampling_params,
             **kwargs,
         }
-        response = await self.request("/v1/chat/completions", payload, self.headers())
+        request_metadata: dict[str, Any] = {}
+        if _is_nex_model(self.name):
+            payload, request_metadata = _sanitize_payload_for_nex(payload)
+        try:
+            response = await self.request("/v1/chat/completions", payload, self.headers())
+        except Exception as exc:
+            if _is_nex_model(self.name):
+                response_obj = getattr(exc, "response", None)
+                authorization_header = self.headers().get("Authorization", "")
+                if response_obj is not None:
+                    try:
+                        error_text = response_obj.text
+                    except Exception:
+                        error_text = str(response_obj)
+                    request_metadata["nex_error_text"] = _redact_nex_log_text(
+                        error_text, authorization_header
+                    )
+                    request_metadata["nex_error_status"] = getattr(response_obj, "status_code", None)
+                    request_metadata["nex_error_method"] = getattr(
+                        getattr(response_obj, "request", None), "method", None
+                    )
+                    request_metadata["nex_error_url"] = _redact_nex_log_text(
+                        str(getattr(getattr(response_obj, "request", None), "url", "")),
+                        authorization_header,
+                    )
+            raise
         choice = response["choices"][0]
         assistant = ChatMessage.from_dict(choice["message"])
         metadata = {
             "finish_reason": choice.get("finish_reason"),
+            **request_metadata,
             **{
                 key: response[key]
                 for key in ("id", "model", "system_fingerprint")
@@ -436,6 +541,11 @@ async def run(args: argparse.Namespace) -> None:
             else {}
         ),
     }
+    nex_request_metadata = (
+        _sanitize_sampling_params_for_nex(sampling_params)
+        if _is_nex_model(args.model)
+        else {}
+    )
     model = TraceOpenAIClient(
         endpoint,
         args.model,
@@ -479,6 +589,8 @@ async def run(args: argparse.Namespace) -> None:
         "http_retries": args.http_retries,
         "concurrency": args.concurrency,
         "max_steps": args.max_steps,
+        "nex_request_compatibility": bool(nex_request_metadata),
+        "nex_sanitized_sampling_params": nex_request_metadata,
     }
     if candidate is not None:
         run_config["candidate_id"] = candidate.candidate_id

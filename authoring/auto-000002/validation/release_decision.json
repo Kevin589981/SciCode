@@ -1,0 +1,65 @@
+{
+  "schema": "scicode-release-decision-v1",
+  "status": "accepted",
+  "candidate_id": "auto-000002",
+  "revision": "r1",
+  "mode": "strict",
+  "prompt_profile": "background",
+  "strict_protocol": true,
+  "promotable": true,
+  "trace_complete": true,
+  "sample_count": 3,
+  "completed_subproblems": 3,
+  "expected_subproblems": 3,
+  "run_id": "auto-000002-r1-nex-strict-20260912-11",
+  "solver_model": "nex-agi/Nex-N2-Pro",
+  "solver_profile": "/root/scicode-authoring/.env-nex",
+  "avacore_runner_path": "/root/scicode-authoring/repository/eval/avacore/scicode_avacore.py",
+  "avacore_commit": "6788d2f659bfd76ff011a4305f082692144df9a1",
+  "source_commit": "f522337ef75abef1153e2025a204b7ef4f7c5c9f",
+  "source_license": "BSD-3-Clause",
+  "paper_doi": "10.1137/110829270",
+  "source_url": "https://raw.githubusercontent.com/clawpack/pyclaw/master/examples/advection_1d/advection_1d.py",
+  "source_fingerprint": "advection_1d.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:2b7a0f535c19da98d8c9c401d963ee3b6562a5381e8db33510cd5f1e65a6fdc4; classic/solver.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:a1e890b919f300726d2556aeef5724b0bbc7c063b48bb5744104c8e74d3bf0e2",
+  "hashes": {
+    "canonical_record_sha256": "7d889c4336916c1dc96c571a7473d8f37f4a988d5bc6fa675532980b60d2823a",
+    "visible_contract_sha256": "5c8a9dd400f42b1588a22f7a69fcf82b1cf2b460309329072f8f3fb7b2604e4c",
+    "solver_payload_sha256": "09c46919a00e07c7048bef26b12224ebdfa8b612468ec0060968c02ee8d1dd22",
+    "oracle_sha256": "6ee7732c484c6433b1210eae70661f5942813d1cec3174f67dc73c954d36bb85",
+    "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35"
+  },
+  "trace_hashes": {
+    "manifest_trace_export_sha256": "e26666e425dd3e265072c4b2f4d21c99adedc32fc8be6395d802eb4bd46399b7",
+    "trace_audit_rollouts_sha256": "9e02c4e6918a8bfa42af2d5a68a2481f87cffa84898d2a0bef1bb6a421e00515",
+    "note": "trace_audit_rollouts_sha256 is the normalized JSONL rows audit hash produced by scripts/check_trace.py, not the raw file byte hash."
+  },
+  "usage": {
+    "cached_tokens": 0,
+    "completion_tokens": 9080,
+    "prompt_tokens": 2331,
+    "reasoning_tokens": 8548,
+    "total_tokens": 11411
+  },
+  "evaluator_status": {
+    "promotable": true,
+    "score": null,
+    "score_metric": "subproblem_correctness",
+    "notes": "AvaCore manifest records promotable=true and contains no score field."
+  },
+  "validation_reports": {
+    "schema": "ok",
+    "static": "ok",
+    "oracle": "ok",
+    "prompt": "ok",
+    "isolation": "ok",
+    "leakage": "ok",
+    "trace": "ok",
+    "checks": "ok"
+  },
+  "child_review": {
+    "event_id": "kimi-code-child-public-review-auto-000002-r1",
+    "decision": "proceed",
+    "blocking_issues": []
+  },
+  "acceptance_reason": "Strict Nex AvaCore run finished, all 3 ordered subproblems produced complete traces with usage metadata, trace audit reported no failures or warnings, child review found no blocking leakage/scientific issues, and schema/static/oracle/prompt/isolation/leakage/trace checks all passed for a non-official external scientific source."
+}

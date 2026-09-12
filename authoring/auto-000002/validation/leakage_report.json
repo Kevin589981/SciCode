@@ -1,0 +1,13 @@
+{
+  "schema": "scicode-leakage-audit-v1",
+  "status": "ok",
+  "candidate_id": "auto-000002",
+  "revision": "r1",
+  "basis": "validation/isolation_report.json",
+  "basis_status": "ok",
+  "private_material_visible_to_solver": false,
+  "notes": [
+    "run_candidate_checks isolation_report reported status ok",
+    "child review was limited to public material only and found no blocking leakage issue"
+  ]
+}

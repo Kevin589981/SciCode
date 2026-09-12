@@ -1,0 +1,57 @@
+{
+  "candidate_id": "auto-000002",
+  "revision": "r1",
+  "event_id": "kimi-code-child-public-review-auto-000002-r1",
+  "session_id": "agent-0",
+  "created_at": "2026-09-12T01:20:00Z",
+  "request": {
+    "reviewer": "kimi-code-child-public-review",
+    "scope": "public material only; no oracle, reference, private author notes, target files, or prior run traces",
+    "allowed_inputs": [
+      "authoring/auto-000002/public/problem.jsonl",
+      "authoring/auto-000002/public/README.md",
+      "authoring/auto-000002/public/checks/public_invariants.py",
+      "authoring/auto-000002/public/prompt_snapshot/with_background/auto-000002.1.txt",
+      "authoring/auto-000002/public/prompt_snapshot/with_background/auto-000002.2.txt",
+      "authoring/auto-000002/public/prompt_snapshot/with_background/auto-000002.3.txt",
+      "authoring/auto-000002/source_notes/provenance.json",
+      "authoring/auto-000002/candidate.json",
+      "authoring/auto-000002/validation/schema_report.json",
+      "authoring/auto-000002/validation/static_report.json",
+      "authoring/auto-000002/validation/oracle_report.json",
+      "authoring/auto-000002/validation/prompt_report.json",
+      "authoring/auto-000002/validation/isolation_report.json",
+      "authoring/auto-000002/validation/checks_report.json"
+    ],
+    "validation_contract": [
+      "candidate must be based on a non-official external scientific source, not official SciCode tasks or eval/data/test_data.h5",
+      "canonical JSONL must preserve SciCode top-level fields and ordered sub_steps with function headers and public tests",
+      "prompt snapshots must match the upstream background prompt profile and must not leak private targets, reference, oracle, or evaluator intent",
+      "public solver payload must not expose private target values, reference code, oracle files, author notes, prior runs, or evaluator intent",
+      "scientific decomposition must form a real dependency chain with meaningful numerical/scientific concepts, units/shape conventions, boundary conditions, and checks",
+      "local validation reports must be ok, or failures must be blocking"
+    ]
+  },
+  "response": {
+    "reviewer": "kimi-code-child-public-review",
+    "decision": "proceed",
+    "blocking_issues": [],
+    "non_blocking_notes": [
+      "Step 1 uses the term \"upwind\" even for negative velocity, while the required formula explicitly uses the left periodic neighbor; the formula and tests are unambiguous, so this is a terminology/clarity note rather than a blocking issue.",
+      "Step 3 public test cases reference hidden `target` values, so they are not self-contained public tests; this appears consistent with the SciCode target-injection style and the validation reports are ok."
+    ],
+    "public_evidence": [
+      "source_notes/provenance.json pins an external PyClaw source commit f522337ef75abef1153e2025a204b7ef4f7c5c9f, BSD-3-Clause license, paper DOI, and source fingerprints.",
+      "public/problem.jsonl contains the required SciCode top-level fields, numpy dependency, 3 ordered sub_steps, function headers, return lines, and test cases.",
+      "public/prompt_snapshot/with_background/auto-000002.{1,2,3}.txt show previous-step continuity for steps 1, 2, and 3 and no detected target/oracle/private/reference/author/evaluator leakage.",
+      "public/checks/public_invariants.py contains public invariant checks for conservation and expected flux-difference values without oracle values.",
+      "validation/schema_report.json reports status ok for 1 problem and 3 subproblems.",
+      "validation/static_report.json reports public checks, reference, and oracle validation all ok with no failures.",
+      "validation/oracle_report.json reports status ok for 3 steps and 9 tests.",
+      "validation/prompt_report.json, validation/isolation_report.json, and validation/checks_report.json all report ok."
+    ],
+    "recommended_next_action": "Proceed to strict AvaCore run."
+  },
+  "decision": "proceed",
+  "decision_reason": "Child review found no blocking scientific, clarity, provenance, leakage, or validation-contract issues in the public material."
+}

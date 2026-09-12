@@ -1,0 +1,24 @@
+numpy
+
+def upwind_flux_difference(q: np.ndarray, velocity: float, dx: float) -> np.ndarray:
+    """Return the periodic first-order upwind derivative -d(a q)/dx for constant velocity."""
+    left = np.roll(q, 1)
+    derivative = -velocity * (q - left) / dx
+    return derivative
+
+
+
+
+def lax_wendroff_step(q: np.ndarray, velocity: float, dx: float, dt: float) -> np.ndarray:
+    """Advance q one step for q_t + a q_x = 0 using periodic Lax-Wendroff."""
+    c = velocity * dt / dx
+    left = np.roll(q, 1)
+    right = np.roll(q, -1)
+
+    q_new = (
+        q
+        - 0.5 * c * (right - left)
+        + 0.5 * c * c * (right - 2.0 * q + left)
+    )
+
+    return q_new

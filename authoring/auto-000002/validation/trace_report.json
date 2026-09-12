@@ -1,0 +1,12 @@
+{
+  "schema": "scicode-trace-audit-v1",
+  "status": "ok",
+  "candidate_id": "auto-000002",
+  "revision": "r1",
+  "rollout_rows": 1,
+  "expected_problem_rows": 1,
+  "complete_subproblems": 3,
+  "failures": [],
+  "warnings": [],
+  "rollouts_sha256": "9e02c4e6918a8bfa42af2d5a68a2481f87cffa84898d2a0bef1bb6a421e00515"
+}

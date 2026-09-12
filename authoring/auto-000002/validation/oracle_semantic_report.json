@@ -1,0 +1,79 @@
+{
+  "status": "ok",
+  "implementations": [
+    {
+      "implementation": "reference",
+      "all_passed": true,
+      "steps": [
+        {
+          "step_number": "1",
+          "passed": true,
+          "failures": []
+        },
+        {
+          "step_number": "2",
+          "passed": true,
+          "failures": []
+        },
+        {
+          "step_number": "3",
+          "passed": true,
+          "failures": []
+        }
+      ]
+    },
+    {
+      "implementation": "independent",
+      "all_passed": true,
+      "steps": [
+        {
+          "step_number": "1",
+          "passed": true,
+          "failures": []
+        },
+        {
+          "step_number": "2",
+          "passed": true,
+          "failures": []
+        },
+        {
+          "step_number": "3",
+          "passed": true,
+          "failures": []
+        }
+      ]
+    },
+    {
+      "implementation": "wrong",
+      "all_passed": false,
+      "steps": [
+        {
+          "step_number": "1",
+          "passed": false,
+          "failures": [
+            "test1: AssertionError: ",
+            "test2: AssertionError: ",
+            "test3: AssertionError: "
+          ]
+        },
+        {
+          "step_number": "2",
+          "passed": false,
+          "failures": [
+            "test1: AssertionError: ",
+            "test3: AssertionError: "
+          ]
+        },
+        {
+          "step_number": "3",
+          "passed": false,
+          "failures": [
+            "test1: AssertionError: ",
+            "test2: AssertionError: ",
+            "test3: AssertionError: "
+          ]
+        }
+      ]
+    }
+  ]
+}
