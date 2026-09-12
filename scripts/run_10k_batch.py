@@ -431,10 +431,7 @@ class BatchRunner:
         if env.get("BASE_URL"):
             env.setdefault("KIMI_MODEL_BASE_URL", env["BASE_URL"])
         if env.get("MODEL"):
-            env.setdefault("KIMI_MODEL", env["MODEL"])
             env.setdefault("KIMI_MODEL_NAME", env["MODEL"])
-        if env.get("KIMI_MODEL"):
-            env.setdefault("MODEL", env["KIMI_MODEL"])
         return env
 
     def _author_prompt(self, job: Job, *, resume: bool, reason: str | None = None) -> str:

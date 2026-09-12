@@ -124,6 +124,7 @@ def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
     )
     env = runner._child_env(job)
     assert env["OPENAI_API_KEY"] == "secret"
-    assert env["KIMI_MODEL"] == "model-name"
+    assert env["MODEL"] == "model-name"
+    assert "KIMI_MODEL" not in env
     assert env["KIMI_MODEL_BASE_URL"] == "http://model.internal/v1"
     assert env["SCICODE_CANDIDATE_ID"] == "auto-000001"

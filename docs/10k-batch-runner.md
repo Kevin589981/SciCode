@@ -41,7 +41,7 @@ for example:
 ```bash
 BASE_URL=https://your-internal-model-host/v1
 OPENAI_API_KEY=replace-me
-KIMI_MODEL=your-model-name
+MODEL=your-model-name
 POSTGRES=postgresql://user:password@db-host:5432/avacore
 ```
 

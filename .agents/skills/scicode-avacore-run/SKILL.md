@@ -16,7 +16,8 @@ Require these paths and settings from the candidate manifest:
 - private `oracle/targets.h5`
 - candidate id and revision
 - final model and sampling configuration
-- the configured solver `BASE_URL` and `OPENAI_API_KEY`
+- the configured solver `BASE_URL`, model name (`KIMI_MODEL` or `MODEL`), and
+  `OPENAI_API_KEY`
 - PostgreSQL connection from the environment
 - AvaCore checkout and Python environment
 
@@ -36,7 +37,7 @@ python scripts/submit_avacore_run.py \
   --avacore-python /root/scicode-avacore/AvaCore/.venv/bin/python \
   --runner /root/scicode-authoring/repository/eval/avacore/scicode_avacore.py \
   --base-url "$BASE_URL" \
-  --model "$KIMI_MODEL" \
+  --model "${KIMI_MODEL:-$MODEL}" \
   --postgres "$POSTGRES" \
   --run-id "$RUN_ID" \
   --temperature "$TEMPERATURE" \
@@ -74,15 +75,6 @@ status and return it for quality analysis. For Nex-compatible endpoints the
 adapter sends an effective `max_tokens` cap of 256,000 so input plus output
 stays below the provider context boundary; record both requested and effective
 values in the manifest.
-
-For a run to be returned as complete, require every subproblem trace to retain
-ordinary assistant content, provider reasoning content, code-extraction status,
-finish status, and token usage. Require `prompt_tokens`, `completion_tokens`,
-`reasoning_tokens`, and `total_tokens` when the provider exposes usage. Treat
-reasoning and usage as trace data, not disposable annotations. A missing
-reasoning field or required usage makes the trace incomplete and requires a
-rerun or an explicit incomplete classification. Preserve all available fields
-for a `finish_reason=length` trace.
 
 ## Return
 
