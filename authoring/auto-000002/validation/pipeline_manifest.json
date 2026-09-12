@@ -4,7 +4,7 @@
   "revision": "r2",
   "state": "accepted",
   "mode": "strict",
-  "created_at": "2026-09-12T04:39:06.184232+00:00",
+  "created_at": "2026-09-12T05:12:39.945019+00:00",
   "candidate_manifest": {
     "candidate_id": "auto-000002",
     "revision": "r2",
@@ -16,11 +16,11 @@
     "canonical_record_sha256": "bc57d915a8012b50ff362938b925cf1317bd04c41b4a3fd16252b2aa9cde6ce1",
     "visible_contract_sha256": "fbe2fd6b678c7e3b5e3ce1b3dc0785c2d936a57967b541780fd086ebb66ef0be",
     "solver_payload_sha256": "2dbe7bc7a026c8222e9d1f28dd64b9020600f123c53f6a475fda18fe367c376d",
-    "oracle_sha256": "cda442c576499e994a5adb75dd0e101a478328728a7fb840244a8547d8a294d7",
+    "oracle_sha256": "4888e34a9b53233b23a4115a16a02bdf6c5d6f69ed5ba365d72b0438274c7c46",
     "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35",
     "prompt_profile": "background",
     "mode": "strict",
-    "created_at": "2026-09-12T04:39:06.061716+00:00",
+    "created_at": "2026-09-12T05:12:39.815527+00:00",
     "source_url": "https://raw.githubusercontent.com/clawpack/pyclaw/master/examples/advection_1d/advection_1d.py",
     "source_commit": "f522337ef75abef1153e2025a204b7ef4f7c5c9f",
     "license": "BSD-3-Clause",
@@ -42,11 +42,11 @@
       "canonical_record_sha256": "bc57d915a8012b50ff362938b925cf1317bd04c41b4a3fd16252b2aa9cde6ce1",
       "visible_contract_sha256": "fbe2fd6b678c7e3b5e3ce1b3dc0785c2d936a57967b541780fd086ebb66ef0be",
       "solver_payload_sha256": "2dbe7bc7a026c8222e9d1f28dd64b9020600f123c53f6a475fda18fe367c376d",
-      "oracle_sha256": "cda442c576499e994a5adb75dd0e101a478328728a7fb840244a8547d8a294d7",
+      "oracle_sha256": "4888e34a9b53233b23a4115a16a02bdf6c5d6f69ed5ba365d72b0438274c7c46",
       "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35",
       "prompt_profile": "background",
       "mode": "strict",
-      "created_at": "2026-09-12T04:39:06.137234+00:00",
+      "created_at": "2026-09-12T05:12:39.893922+00:00",
       "source_url": "https://raw.githubusercontent.com/clawpack/pyclaw/master/examples/advection_1d/advection_1d.py",
       "source_commit": "f522337ef75abef1153e2025a204b7ef4f7c5c9f",
       "license": "BSD-3-Clause",
@@ -106,7 +106,7 @@
     "complete_subproblems": 3,
     "failures": [],
     "warnings": [],
-    "rollouts_sha256": "86579c76730dec62f49723f8d1f35530d80189f68b9b0eb86b4f8cfb1a7b12d5"
+    "rollouts_sha256": "4d00627814c0df013f57f0720ea64e4e2d4cb7bb67e6106a4a1f77b8033d3c77"
   },
   "export": {
     "schema": "scicode-sft-delivery-v2",
@@ -120,10 +120,10 @@
     "target_count": 3,
     "overflow_samples": 0,
     "invalid_rollouts": [],
-    "output": "/root/scicode-authoring/delivery-smoke-r2-pipeline/dataset.jsonl",
-    "output_sha256": "f35468e0c2abd745622f68286e00bf72746cd41afe23e608dad2dca9a16ce46e",
-    "registry": "/root/scicode-authoring/delivery-smoke-r2-pipeline/registry.jsonl",
-    "registry_sha256": "1a497c2c88a06c72c4c973ba800f616424507a3d7359e5cd70b4fa1127b91752",
+    "output": "/root/scicode-authoring/delivery-smoke-r2-pipeline16/dataset.jsonl",
+    "output_sha256": "5b9129fbc33868928bfe759e82c51750a84b276bbc79e6e88bfe729ced52ed23",
+    "registry": "/root/scicode-authoring/delivery-smoke-r2-pipeline16/registry.jsonl",
+    "registry_sha256": "54c7d6586608f81f96ec9f5c15d730d866fcf233d9decdf0bbe7168aba363f37",
     "overflow": null
   }
 }

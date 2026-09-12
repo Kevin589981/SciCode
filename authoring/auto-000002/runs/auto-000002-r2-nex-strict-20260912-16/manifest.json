@@ -1,0 +1,82 @@
+{
+  "candidate": {
+    "candidate_id": "auto-000002",
+    "canonical_record_sha256": "bc57d915a8012b50ff362938b925cf1317bd04c41b4a3fd16252b2aa9cde6ce1",
+    "created_at": "2026-09-12T04:57:48.097552+00:00",
+    "license": "BSD-3-Clause",
+    "mode": "strict",
+    "oracle_file": "/root/scicode-authoring/candidates/auto-000002-r2/authoring/auto-000002/oracle/targets.h5",
+    "oracle_sha256": "4888e34a9b53233b23a4115a16a02bdf6c5d6f69ed5ba365d72b0438274c7c46",
+    "paper_doi": "10.1137/110829270",
+    "paper_url": "https://epubs.siam.org/doi/10.1137/110829270",
+    "problem_count": 1,
+    "problem_file": "/root/scicode-authoring/candidates/auto-000002-r2/authoring/auto-000002/public/problem.jsonl",
+    "prompt_profile": "background",
+    "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35",
+    "revision": "r2",
+    "root": "/root/scicode-authoring/candidates/auto-000002-r2/authoring/auto-000002",
+    "solver_payload_sha256": "2dbe7bc7a026c8222e9d1f28dd64b9020600f123c53f6a475fda18fe367c376d",
+    "source_commit": "f522337ef75abef1153e2025a204b7ef4f7c5c9f",
+    "source_fingerprint": "advection_1d.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:2b7a0f535c19da98d8c9c401d963ee3b6562a5381e8db33510cd5f1e65a6fdc4; classic/solver.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:a1e890b919f300726d2556aeef5724b0bbc7c063b48bb5744104c8e74d3bf0e2",
+    "source_url": "https://raw.githubusercontent.com/clawpack/pyclaw/master/examples/advection_1d/advection_1d.py",
+    "subproblem_count": 3,
+    "visible_contract_sha256": "fbe2fd6b678c7e3b5e3ce1b3dc0785c2d936a57967b541780fd086ebb66ef0be"
+  },
+  "completed_problems": 1,
+  "completed_subproblems": 3,
+  "config": {
+    "base_url": "https://aigw.sotatts.online/v1",
+    "candidate_hashes": {
+      "canonical_record_sha256": "bc57d915a8012b50ff362938b925cf1317bd04c41b4a3fd16252b2aa9cde6ce1",
+      "oracle_sha256": "4888e34a9b53233b23a4115a16a02bdf6c5d6f69ed5ba365d72b0438274c7c46",
+      "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35",
+      "solver_payload_sha256": "2dbe7bc7a026c8222e9d1f28dd64b9020600f123c53f6a475fda18fe367c376d",
+      "visible_contract_sha256": "fbe2fd6b678c7e3b5e3ce1b3dc0785c2d936a57967b541780fd086ebb66ef0be"
+    },
+    "candidate_id": "auto-000002",
+    "concurrency": 1,
+    "h5py_file": "/root/scicode-authoring/candidates/auto-000002-r2/authoring/auto-000002/oracle/targets.h5",
+    "http_retries": 5,
+    "max_steps": null,
+    "max_tokens": 262144,
+    "model": "nex-agi/Nex-N2-Pro",
+    "nex_request_compatibility": true,
+    "nex_sanitized_sampling_params": {
+      "max_tokens": 256000,
+      "temperature": 0.0
+    },
+    "problem_file": "/root/scicode-authoring/candidates/auto-000002-r2/authoring/auto-000002/public/problem.jsonl",
+    "problem_ids": null,
+    "prompt_profile": "background",
+    "score_metric": "subproblem_correctness",
+    "split": "test",
+    "storage_query_id_strategy": "candidate_revision_hash::problem_id",
+    "task_revision": "r2",
+    "temperature": 0.0,
+    "timeout": 7200.0,
+    "with_background": true
+  },
+  "created_at": "2026-09-12T05:00:31.493651+00:00",
+  "errors": 0,
+  "expected_problems": 1,
+  "expected_subproblems": 3,
+  "mode": "strict",
+  "notes": [],
+  "promotable": true,
+  "retries": 5,
+  "run_id": "auto-000002-r2-nex-strict-20260912-16",
+  "schema": "scicode-avacore-run-v2",
+  "status": "finished",
+  "trace_complete": true,
+  "trace_export": {
+    "path": "/root/scicode-authoring/candidates/auto-000002-r2/authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-16/rollouts.jsonl",
+    "sha256": "8183d9e0989124ca7c183b7f1dda20e57bb6d18aacec787ea8de7fcec0295bb3"
+  },
+  "usage": {
+    "cached_tokens": 0,
+    "completion_tokens": 17412,
+    "prompt_tokens": 2793,
+    "reasoning_tokens": 16784,
+    "total_tokens": 20205
+  }
+}
