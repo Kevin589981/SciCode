@@ -423,9 +423,15 @@ class BatchRunner:
         env["SCICODE_BATCH_ID"] = self.batch_id
         env["SCICODE_CANDIDATE_ID"] = job.candidate_id
         env["SCICODE_CANDIDATE_DIR"] = str(job.candidate_dir)
-        # Keep solver credentials in the child environment without setting
-        # KIMI_MODEL_* overrides: Kimi Code treats those names as a dynamic
-        # model definition and would bypass the configured model alias.
+        # Keep solver credentials and routing in the child environment without
+        # allowing Kimi Code's dynamic KIMI_MODEL_* variables to override its
+        # isolated config.toml. KIMI_MODEL is accepted only as a solver-model
+        # alias when MODEL was not supplied.
+        if not env.get("MODEL") and env.get("KIMI_MODEL"):
+            env["MODEL"] = env["KIMI_MODEL"]
+        for name in list(env):
+            if name == "KIMI_MODEL" or name.startswith("KIMI_MODEL_"):
+                env.pop(name, None)
         if env.get("API_KEY"):
             env.setdefault("OPENAI_API_KEY", env["API_KEY"])
         return env

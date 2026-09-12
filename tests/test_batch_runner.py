@@ -106,6 +106,10 @@ def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
         "API_KEY": "secret",
         "BASE_URL": "http://model.internal/v1",
         "MODEL": "model-name",
+        "KIMI_MODEL": "wrong-dynamic-alias",
+        "KIMI_MODEL_BASE_URL": "http://wrong-model-host/v1",
+        "HTTP_PROXY": "http://source-proxy",
+        "NO_PROXY": "localhost,.cn",
     }
     runner.config = BatchConfig(
         repository_root="/repo",
@@ -125,7 +129,33 @@ def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
     env = runner._child_env(job)
     assert env["OPENAI_API_KEY"] == "secret"
     assert env["MODEL"] == "model-name"
+    assert env["BASE_URL"] == "http://model.internal/v1"
+    assert env["HTTP_PROXY"] == "http://source-proxy"
+    assert env["NO_PROXY"] == "localhost,.cn"
     assert "KIMI_MODEL" not in env
     assert "KIMI_MODEL_BASE_URL" not in env
     assert not any(name.startswith("KIMI_MODEL_") for name in env)
     assert env["SCICODE_CANDIDATE_ID"] == "auto-000001"
+
+
+def test_child_env_promotes_solver_model_alias_before_removing_dynamic_name():
+    runner = object.__new__(BatchRunner)
+    runner.base_env = {"KIMI_MODEL": "solver-alias"}
+    runner.config = BatchConfig(
+        repository_root="/repo",
+        workspace_root="/workspace",
+        delivery_root="/delivery",
+        batch_root="/batches",
+    )
+    runner.batch_id = "batch-1"
+    job = Job(
+        candidate_id="auto-000001",
+        index=1,
+        worktree_path="/workspace/candidate",
+        branch="author/auto-000001",
+        allocation_path="/workspace/allocation.json",
+        job_root="/workspace/job",
+    )
+    env = runner._child_env(job)
+    assert env["MODEL"] == "solver-alias"
+    assert "KIMI_MODEL" not in env
