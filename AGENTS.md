@@ -227,8 +227,6 @@ usage, finish status, and auditable code extraction.
 Write the candidate release decision and all required candidate artifacts. Then
 invoke `.agents/skills/scicode-delivery/SKILL.md`; do not hand-edit a final
 dataset, bypass the delivery skill, or merge another candidate's worktree.
-Leave framework aggregation, storage, locking, and delivery decisions to the
-delivery skill.
 
 ## 11. Final prohibitions
 
