@@ -559,7 +559,14 @@ candidate artifacts before declaring the candidate complete. Do not push.
     def _finish_process(self, job: Job) -> bool:
         process = self.processes.get(job.candidate_id)
         if process is None:
-            return not pid_alive(job.pid)
+            if job.pid and pid_alive(job.pid):
+                return False
+            if job.pid:
+                job.pid = None
+                if job.last_exit_code is None:
+                    job.last_exit_code = -1
+                job.updated_at = now()
+            return True
         code = process.poll()
         if code is None:
             return False
@@ -748,6 +755,9 @@ candidate artifacts before declaring the candidate complete. Do not push.
         if job.stage == "authoring":
             if not process_finished:
                 return
+            if job.last_exit_code not in (None, 0) and handoff is None:
+                self._fail(job, f"authoring process exited with code {job.last_exit_code} before handoff")
+                return
             if handoff is not None:
                 job.stage = "waiting_solver"
                 job.updated_at = now()
@@ -776,6 +786,9 @@ candidate artifacts before declaring the candidate complete. Do not push.
             if self._release_accepted(job):
                 job.stage = "delivery"
                 self._deliver(job)
+                return
+            if job.last_exit_code not in (None, 0):
+                self._fail(job, f"review process exited with code {job.last_exit_code}")
                 return
             if job.round < self.config.max_rounds:
                 self._launch(
