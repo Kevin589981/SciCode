@@ -2,7 +2,7 @@
 
 ## Revision status
 
-Revision r2 is accepted for the strict AvaCore run. The first three handoffs were retained as infrastructure-failure evidence; run 15 completed all three subproblems and produced an auditable trace. The solver passed 1/3 subproblems (0/1 whole problem), which is a solver result rather than a candidate or evaluator failure.
+Revision r2 is accepted for the strict AvaCore run. The first four handoffs were retained as infrastructure-failure evidence; run 16 completed all three subproblems and produced an auditable trace against the final oracle. The solver passed 1/3 subproblems (0/1 whole problem), which is a solver result rather than a candidate or evaluator failure.
 
 ## r1 rejection basis
 
@@ -29,7 +29,7 @@ r1 was treated as rejected. The strict run exported structurally complete traces
 - Canonical record hash: `bc57d915a8012b50ff362938b925cf1317bd04c41b4a3fd16252b2aa9cde6ce1`
 - Visible contract hash: `fbe2fd6b678c7e3b5e3ce1b3dc0785c2d936a57967b541780fd086ebb66ef0be`
 - Solver payload hash: `2dbe7bc7a026c8222e9d1f28dd64b9020600f123c53f6a475fda18fe367c376d`
-- Oracle hash: `cda442c576499e994a5adb75dd0e101a478328728a7fb840244a8547d8a294d7`
+- Oracle hash: `4888e34a9b53233b23a4115a16a02bdf6c5d6f69ed5ba365d72b0438274c7c46`
 - Provenance hash: `3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35`
 - Source: PyClaw advection example and classic solver documentation
 - Source commit: `f522337ef75abef1153e2025a204b7ef4f7c5c9f`
@@ -60,7 +60,7 @@ The public payload was subsequently normalized from an accidental nested directo
 
 ## AvaCore strict run attempts
 
-Three strict AvaCore run directories were retained as audit evidence.
+Five strict AvaCore run directories were retained as audit evidence.
 
 ### Run 12
 
@@ -95,9 +95,9 @@ Three strict AvaCore run directories were retained as audit evidence.
 - Log: `Set POSTGRES or pass --postgres; AvaCore PostgreSQL is the primary trace store`
 - Classification: infrastructure blocker. The shell still did not provide `POSTGRES`, so AvaCore stopped before solver execution and before exporting rollouts.
 
-### Run 15 (successful strict evidence)
+### Run 16 (successful strict evidence)
 
-- Directory: `authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-15`
+- Directory: `authoring/auto-000002/runs/auto-000002-r2-nex-strict-20260912-16`
 - Base URL: `https://aigw.sotatts.online/v1`
 - Model: `nex-agi/Nex-N2-Pro`
 - Requested max tokens: `262144`; effective Nex cap: `256000`
@@ -107,10 +107,12 @@ Three strict AvaCore run directories were retained as audit evidence.
 - Reward: subproblem correctness `1/3 = 0.3333333333333333`; whole-problem correctness `0`
 - Evaluator logs: one subproblem passed and two failed; no parser, dependency, or `NameError` failure occurred
 - Every assistant message contains ordinary code content, reasoning content, `finish_reason=stop`, provider response metadata, and usage
-- Token totals: prompt `2787`, completion `7867`, reasoning `7202`, total `10654`
+- Token totals: prompt `2793`, completion `17412`, reasoning `16784`, total `20205`
 - Trace audit: `validation/trace_report.json` status `ok`, with all three subproblem traces present and usage available
 
 The downstream delivery converter was also run against this trace with a target of three records. It expanded the one rollout into three complete subproblem samples, accepted all three, wrote the standard fields (`messages`, `completion`, `reasoning_content`, `completion_with_reasoning`, `parsed_code`, `context_code`, `provider_response`, `usage`, and metadata), and reached the target without overflow. The structured result is saved as `validation/delivery_smoke.json`.
+
+The final oracle was regenerated after the reference implementation was frozen. Repeated generation with the same environment produced the stable SHA-256 `4888e34a9b53233b23a4115a16a02bdf6c5d6f69ed5ba365d72b0438274c7c46`; run16 and its candidate manifest use this hash.
 
 The model answer is intentionally retained as QA evidence even though it is not fully correct; candidate release depends on a valid problem/oracle and a complete trace, not on requiring the solver to pass every subproblem.
 
@@ -127,13 +129,13 @@ No remaining candidate error is known from the completed r2 local gates or publi
 
 ### Solver errors
 
-Run 15 has a complete trace. Its evaluator result is `1/3` subproblems correct; the two failed subproblems are ordinary solver failures. The trace is still valid for quality review because all content, reasoning, finish reasons, provider responses, and usage fields are present.
+Run 16 has a complete trace. Its evaluator result is `1/3` subproblems correct; the two failed subproblems are ordinary solver failures. The trace is still valid for quality review because all content, reasoning, finish reasons, provider responses, and usage fields are present.
 
 ### Infrastructure errors
 
 - Missing `POSTGRES` in runs 12 and 14.
-- Run 13 used the wrong base URL and then hit an AvaCore PostgreSQL instance conflict.
+- Run 13 used the wrong base URL and then hit an AvaCore PostgreSQL instance conflict. The runner now qualifies storage keys by candidate revision hash, and the wrapper forwards `POSTGRES` explicitly.
 
 ## Release decision
 
-r2 is accepted and promotable after the successful run 15 and all local gates. Failed run directories 12--14 remain as audit evidence and must not be deleted. The candidate is ready for downstream delivery only after the delivery skill re-runs its final checks and performs deduplicated subproblem export.
+r2 is accepted and promotable after the successful run 16 and all local gates. The pipeline now recognizes the child review decision `accepted_for_avacore_run`; its regression test and full delivery run both pass. Failed run directories 12--15 remain as audit evidence and must not be deleted. The candidate is ready for downstream delivery after the delivery skill re-runs its final checks and performs deduplicated subproblem export.
