@@ -1,0 +1,28 @@
+{
+  "schema": "scicode-delivery-smoke-v1",
+  "status": "target_reached",
+  "candidate_id": "auto-000002",
+  "revision": "r2",
+  "run_id": "auto-000002-r2-nex-strict-20260912-15",
+  "rollout_rows": 1,
+  "expanded_samples": 3,
+  "new_samples": 3,
+  "accepted_samples": 3,
+  "target_count": 3,
+  "overflow_samples": 0,
+  "output": "/root/scicode-authoring/delivery-smoke-r2/dataset.jsonl",
+  "output_sha256": "f35468e0c2abd745622f68286e00bf72746cd41afe23e608dad2dca9a16ce46e",
+  "registry": "/root/scicode-authoring/delivery-smoke-r2/registry.jsonl",
+  "registry_sha256": "1a497c2c88a06c72c4c973ba800f616424507a3d7359e5cd70b4fa1127b91752",
+  "sample_fields_verified": [
+    "messages",
+    "completion",
+    "reasoning_content",
+    "completion_with_reasoning",
+    "parsed_code",
+    "context_code",
+    "provider_response",
+    "usage",
+    "metadata"
+  ]
+}

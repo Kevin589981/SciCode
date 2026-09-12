@@ -1,0 +1,40 @@
+PROBLEM DESCRIPTION:
+You will be provided with the main description of the problem, previous steps, and the next step. Your task will be to generate the disciplinary knowledge necessary for solving the next step and then develop a Python solution focused on this step.
+
+PREVIOUS STEPS DESCRIPTION:
+Build the sign-aware periodic upwind flux-difference operator for q_t + a q_x = 0. For constant velocity a, use the first-order upwind numerical flux at each interface: if a >= 0, use the left periodic neighbor at the interface; if a < 0, use the right periodic neighbor. Return the semi-discrete derivative - (F_right - F_left) / dx. This operator is the first-order finite-volume building block for advection; it must conserve the cell average on a periodic grid and wrap across both boundaries.
+The conservative form is q_t = - (F_right - F_left) / dx. A first-order upwind flux chooses the upstream side of each interface: left of the interface for positive velocity and right of the interface for negative velocity. The sign of the velocity therefore changes which periodic neighbor supplies the interface flux, while the periodic derivative still has zero mean.
+
+Implement one periodic Lax-Wendroff update for q_t + a q_x = 0. First compute the sign-aware first-order derivative by calling upwind_flux_difference(q, velocity, dx). Then remove the first-order upwind numerical diffusion with the sign-aware anti-diffusive correction so the update is equivalent to q_new_i = q_i - 0.5*c*(q_{i+1} - q_{i-1}) + 0.5*c*c*(q_{i+1} - 2*q_i + q_{i-1}), where c = a dt / dx. Return a new array and do not mutate the input.
+The Lax-Wendroff scheme is the second-order finite-volume update used by the classic Clawpack advection solver when second-order time stepping is selected. Because the previous step supplies the sign-aware upwind derivative, the anti-diffusive correction must also respect the sign of the Courant number. Periodic wrap must be applied to both neighbors before the centered second derivative is formed.
+
+NEXT STEP - PROBLEM DESCRIPTION AND FUNCTION HEADER:
+This part will describe the next step in the problem-solving process. First, provide the necessary scientific background knowledge as a comment at the beginning of your response, starting with 'Background: '. Then, a function header will be provided, and your task is to develop the Python code for this next step based on the provided description and function header.
+
+Integrate periodic advection to a final time using the Lax-Wendroff step. Use dx = x[1] - x[0], dt = t_final / steps, and L = x[-1] - x[0] + dx. Repeatedly call lax_wendroff_step for the requested number of time steps. After stepping, compare with the exact periodic translation q_exact(x) = q0((x - a*t_final) mod L) by linear interpolation on the same cell centers. Return q_final, l1_error, max_error, and cfl, where l1_error = dx * mean(abs(q_final - q_exact)), max_error = max(abs(q_final - q_exact)), and cfl = abs(a)*dt/dx.
+For periodic advection, the analytic solution is a rigid translation modulo the domain length. Lax-Wendroff is second-order accurate for smooth periodic data but has dispersive phase error; the diagnostics should expose both error norms and the Courant number used by the time step. The full integration routine depends on the sign-aware Lax-Wendroff step from the previous subproblem.
+
+import numpy as np
+
+def integrate_periodic_advection(q0: np.ndarray, x: np.ndarray, velocity: float, t_final: float, steps: int) -> tuple[np.ndarray, float, float, float]:
+    """Integrate periodic advection and return final state plus error and CFL diagnostics."""
+
+return q_final, l1_error, max_error, cfl
+
+DEPENDENCIES:
+Use only the following dependencies in your solution. Do not include these dependencies at the beginning of your code.
+import numpy as np
+
+RESPONSE GUIDELINES:
+1. Start with the scientific background required for the next step, formatted as a comment.
+2. Then write the complete and executable Python program for the next step in a single block.
+3. Your response should focus exclusively on implementing the solution for the next step, adhering closely to the specified function header and the context provided by the initial steps.
+4. DO NOT include previous function code, example usage or test code in your response.
+5. Ensure your response is in the format of ```python``` and includes the necessary background as a comment at the top.
+
+Example:
+```python
+# Background: [Here, insert the necessary scientific knowledge required for the next step.]
+
+[Insert the Python code here based on the provided function header and dependencies.]
+```

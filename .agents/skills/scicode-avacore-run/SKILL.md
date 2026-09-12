@@ -16,10 +16,14 @@ Require these paths and settings from the candidate manifest:
 - private `oracle/targets.h5`
 - candidate id and revision
 - final model and sampling configuration
+- the configured solver `BASE_URL` and `OPENAI_API_KEY`
 - PostgreSQL connection from the environment
 - AvaCore checkout and Python environment
 
 Do not put the API key in the command line or any artifact.
+Require `POSTGRES`, `BASE_URL`, and `OPENAI_API_KEY` to be non-empty before
+submitting. Pass the PostgreSQL DSN to the wrapper with `--postgres "$POSTGRES"`;
+the wrapper keeps it in the detached child environment and never serializes it.
 
 ## Execute
 
@@ -31,8 +35,9 @@ python scripts/submit_avacore_run.py \
   --candidate-dir "$CANDIDATE_DIR" \
   --avacore-python /root/scicode-avacore/AvaCore/.venv/bin/python \
   --runner /root/scicode-authoring/repository/eval/avacore/scicode_avacore.py \
-  --base-url http://10.100.184.127:5050 \
+  --base-url "$BASE_URL" \
   --model "$KIMI_MODEL" \
+  --postgres "$POSTGRES" \
   --run-id "$RUN_ID" \
   --temperature "$TEMPERATURE" \
   --max-tokens 262144 \
@@ -41,8 +46,10 @@ python scripts/submit_avacore_run.py \
   --concurrency "$CONCURRENCY"
 ```
 
-The wrapper inherits `POSTGRES` and `OPENAI_API_KEY` from the environment,
-writes `runs/$RUN_ID/handoff.json`, and returns the PID. Tell Kimi Code to
+The wrapper inherits `OPENAI_API_KEY` and explicitly forwards `POSTGRES`,
+writes `runs/$RUN_ID/handoff.json`, and returns the PID. The adapter records a
+candidate-qualified storage query id while retaining the original
+solver-visible `problem_id`. Tell Kimi Code to
 close the current authoring session after submission. Resume it later with
 `kimi -r SESSION_ID -p "Read the handoff and trace manifest, then continue the
 quality review."`.
@@ -62,8 +69,11 @@ source retrieval; the internal Kimi endpoint may be reached directly.
 Retry a transient or incomplete run up to three times. Stop early when the
 first run has a complete trace for every step. Classify a provider timeout,
 queue failure, connection failure, or database failure as infrastructure. Mark
-`finish_reason=length` at the 262,144-token limit as a normal trace status and
-return it for quality analysis.
+`finish_reason=length` at the 262,144-token deployment limit as a normal trace
+status and return it for quality analysis. For Nex-compatible endpoints the
+adapter sends an effective `max_tokens` cap of 256,000 so input plus output
+stays below the provider context boundary; record both requested and effective
+values in the manifest.
 
 ## Return
 

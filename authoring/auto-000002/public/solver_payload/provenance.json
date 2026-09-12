@@ -1,0 +1,24 @@
+{
+  "source_url": "https://raw.githubusercontent.com/clawpack/pyclaw/master/examples/advection_1d/advection_1d.py",
+  "repository_url": "https://github.com/clawpack/pyclaw",
+  "source_commit": "f522337ef75abef1153e2025a204b7ef4f7c5c9f",
+  "license": "BSD-3-Clause",
+  "paper_url": "https://epubs.siam.org/doi/10.1137/110829270",
+  "paper_doi": "10.1137/110829270",
+  "source_files": [
+    {
+      "path": "examples/advection_1d/advection_1d.py",
+      "url": "https://raw.githubusercontent.com/clawpack/pyclaw/f522337ef75abef1153e2025a204b7ef4f7c5c9f/examples/advection_1d/advection_1d.py",
+      "sha256": "2b7a0f535c19da98d8c9c401d963ee3b6562a5381e8db33510cd5f1e65a6fdc4",
+      "retrieved_for": "periodic 1-D advection equation, periodic boundary conditions, Gaussian initial condition"
+    },
+    {
+      "path": "src/pyclaw/classic/solver.py",
+      "url": "https://raw.githubusercontent.com/clawpack/pyclaw/f522337ef75abef1153e2025a204b7ef4f7c5c9f/src/pyclaw/classic/solver.py",
+      "sha256": "a1e890b919f300726d2556aeef5724b0bbc7c063b48bb5744104c8e74d3bf0e2",
+      "retrieved_for": "classic second-order Lax-Wendroff/LeVeque solver documentation"
+    }
+  ],
+  "source_fingerprint": "advection_1d.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:2b7a0f535c19da98d8c9c401d963ee3b6562a5381e8db33510cd5f1e65a6fdc4; classic/solver.py@f522337ef75abef1153e2025a204b7ef4f7c5c9f:a1e890b919f300726d2556aeef5724b0bbc7c063b48bb5744104c8e74d3bf0e2",
+  "retrieved_at_utc": "2026-09-12T00:00:00Z"
+}

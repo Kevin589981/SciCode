@@ -1,0 +1,21 @@
+{
+  "status": "ok",
+  "parts": {
+    "public_checks": {
+      "status": "ok",
+      "checked": 1,
+      "failures": []
+    },
+    "reference": {
+      "status": "ok",
+      "checked": 3,
+      "failures": []
+    },
+    "oracle": {
+      "status": "ok",
+      "checked": 2,
+      "failures": []
+    }
+  },
+  "failures": []
+}

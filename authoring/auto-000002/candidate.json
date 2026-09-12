@@ -1,0 +1,11 @@
+{
+  "candidate_id": "auto-000002",
+  "revision": "r2",
+  "mode": "strict",
+  "prompt_profile": "background",
+  "worktree_path": "/root/scicode-authoring/candidates/auto-000002-r2",
+  "branch": "author/auto-000002-r2",
+  "base_ref": "codex/scicode-10k-pipeline",
+  "base_commit": "e0fe1af146abb2869f02690cfc2746a5f01b67e3",
+  "created_from_worktree": true
+}

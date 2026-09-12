@@ -57,8 +57,10 @@ Perform these actions before researching or editing a candidate:
 
 Use the following network policy:
 
-- Connect to the Kimi solver through
-  `http://10.100.184.127:5050` using the AvaCore skill.
+- Connect to the Kimi solver through the `BASE_URL` from the selected provider
+  profile using the AvaCore skill. Do not replace a configured endpoint with a
+  hard-coded fallback; record the redacted endpoint identity in the run
+  manifest.
 - Reach GitHub, arXiv, Hugging Face, and Docker Hub through
   `http://httpproxy-headless.kubebrain.svc.lg.shzhisuan.local:3128`.
 - Reach approved domestic services directly when the yicloud network allows
@@ -201,9 +203,10 @@ The skill must:
 1. Close the current authoring phase without destroying its Kimi Code session.
 2. Run `eval/avacore/scicode_avacore.py` in strict mode with the candidate's
    `public/problem.jsonl` and private HDF5 oracle.
-3. Use `http://10.100.184.127:5050` as the Kimi base URL, the configured model
-   and key, the final sampling parameters, a 7,200-second request timeout,
-   and the configured retry policy.
+3. Use the configured provider profile's `BASE_URL`, model and key, the final
+   sampling parameters, a 7,200-second request timeout, and the configured
+   retry policy. Require `POSTGRES` before submission and pass it through the
+   AvaCore handoff wrapper without writing credentials to artifacts.
 4. Run every ordered non-skipped subproblem. Do not use `--max-steps` in a
    quality or formal run.
 5. Store the rollout in AvaCore PostgreSQL and export `rollouts.jsonl`.

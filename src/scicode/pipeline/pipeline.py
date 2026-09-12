@@ -50,7 +50,16 @@ def _review_passed(path: Path) -> bool:
         return False
     value = _read_json(path)
     decision = str(value.get("decision", value.get("status", ""))).lower()
-    return decision in {"pass", "passed", "approved", "accepted"}
+    # Child reviews use the explicit handoff decision
+    # ``accepted_for_avacore_run``; release records use ``accepted``.
+    return decision in {
+        "pass",
+        "passed",
+        "approved",
+        "accepted",
+        "accepted_for_avacore_run",
+        "accepted_for_delivery",
+    }
 
 
 def run_candidate_pipeline(

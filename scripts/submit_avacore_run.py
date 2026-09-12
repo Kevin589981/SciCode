@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -28,6 +29,11 @@ def main() -> int:
     parser.add_argument("--http-retries", type=int, default=5)
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--run-id")
+    parser.add_argument(
+        "--postgres",
+        default=os.getenv("POSTGRES"),
+        help="AvaCore PostgreSQL DSN; kept in the child environment and never written to handoff.json",
+    )
     args = parser.parse_args()
     try:
         result = submit_avacore(
@@ -42,6 +48,7 @@ def main() -> int:
             http_retries=args.http_retries,
             concurrency=args.concurrency,
             run_id=args.run_id,
+            postgres=args.postgres,
         )
     except (HandoffError, OSError, ValueError) as exc:
         print(json.dumps({"status": "rejected", "error": str(exc)}, ensure_ascii=False))

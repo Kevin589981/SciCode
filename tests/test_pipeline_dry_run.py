@@ -35,3 +35,14 @@ def test_pipeline_dry_run_and_delivery_states(tmp_path: Path):
     assert delivered["state"] == "run_complete"
     assert delivered["export"]["accepted_samples"] == 2
     assert (candidate / "validation" / "pipeline_manifest.json").is_file()
+
+
+def test_pipeline_accepts_avacore_child_review_decision(tmp_path: Path):
+    candidate = make_candidate(tmp_path)
+    review = candidate / "validation" / "review_child.json"
+    review.parent.mkdir(parents=True, exist_ok=True)
+    review.write_text(
+        json.dumps({"decision": "accepted_for_avacore_run"}), encoding="utf-8"
+    )
+    result = run_candidate_pipeline(candidate, tmp_path / "delivery")
+    assert result["state"] == "ready_for_run"
