@@ -35,9 +35,12 @@ Before researching or editing, perform these actions:
 1. Read `README.md`, the two files under `eval/data/`,
    `eval/inspect_ai/scicode.py`, `eval/scripts/gencode.py`,
    `src/scicode/parse/parse.py`, this file, and every skill you invoke.
-2. Read `D:/1/desktop/rl-new/kimi命令示例.md` on Windows or its synchronized
-   copy on yicloud before using Kimi Code commands.
-3. Inspect the repository branch and worktree status. Allocate one dedicated
+2. Run only on yicloud. Use `/root/scicode-authoring/repository` as the
+   repository checkout and `/root/scicode-authoring/candidates` as the fixed
+   worktree parent. Use the installed yicloud Kimi Code CLI and its active
+   profile; do not look for alternate local paths or configurations.
+3. Confirm that the checkout contains `AGENTS.md`, `.agents/skills/`,
+   `eval/`, `src/`, and `scripts/` before authoring. Allocate one dedicated
    candidate worktree with `.agents/skills/scicode-worktree/`; do not edit the
    shared checkout while that worktree is active.
 4. Keep provider credentials in environment variables or provider
