@@ -1,0 +1,21 @@
+{
+  "repository_root": "/root/scicode-authoring/repository",
+  "workspace_root": "/root/scicode-authoring",
+  "batch_root": "/root/scicode-authoring/batches",
+  "delivery_root": "/root/scicode-authoring/delivery",
+  "integration_branch": "codex/scicode-10k-pipeline",
+  "candidate_prefix": "auto",
+  "start_index": 1,
+  "concurrency": 4,
+  "target_samples": 10000,
+  "max_candidates": null,
+  "poll_seconds": 30,
+  "max_rounds": 6,
+  "run_timeout_seconds": 7200,
+  "kimi_bin": "/root/scicode-authoring/kimi-1800-exact",
+  "kimi_home": "/root/scicode-authoring/kimi-nex-home",
+  "env_file": "/root/scicode-authoring/.env-nex",
+  "merge_accepted": false,
+  "cleanup_worktrees": false,
+  "drain": true
+}
