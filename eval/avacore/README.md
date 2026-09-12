@@ -65,6 +65,16 @@ contract as official runs, while the candidate's own HDF5 oracle remains the
 private scoring artifact. `--problem-id` and `--limit` can still be used to
 select records from a local candidate JSONL.
 
+The private oracle is not committed to Git. For a freshly cloned candidate,
+recreate it before validation or evaluation with:
+
+```bash
+python /root/scicode-authoring/repository/authoring/CANDIDATE_ID/oracle/generate_targets.py
+```
+
+This uses only the checked-in private reference implementation; the official
+SciCode `test_data.h5` is never a prerequisite for a generated candidate.
+
 For a fully validated candidate, use `--candidate-dir` instead. The runner
 resolves `public/problem.jsonl` and `oracle/targets.h5` from that directory,
 checks the candidate manifest before contacting the provider, and writes a

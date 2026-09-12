@@ -30,6 +30,17 @@ The canonical JSONL remains in the official SciCode shape. The solver gets a
 fresh redacted payload; it never receives `test_cases`, `general_tests`, the
 oracle, reference code, author notes, or prior runs as separate files.
 
+The private `oracle/targets.h5` is intentionally ignored by Git. After a fresh
+clone, rebuild it from the checked-in reference implementation before running
+validation:
+
+```bash
+python authoring/CANDIDATE_ID/oracle/generate_targets.py
+```
+
+The generator is the only source of candidate targets; do not download or use
+the official SciCode `test_data.h5`.
+
 ## Strict AvaCore run
 
 Use the candidate-aware runner:

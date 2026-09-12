@@ -16,8 +16,10 @@ Use this skill for every candidate revision. Follow the commands in
 2. Write the canonical SciCode JSONL record and ordered subproblems. Preserve
    the upstream model-visible prompt fields and do not use official SciCode
    records or `test_data.h5`.
-3. Write private reference, independent, and wrong implementations. Generate
-   the candidate HDF5 oracle from the reference and record its hash.
+3. Write private reference, independent, and wrong implementations. Run
+   `python authoring/$CANDIDATE_ID/oracle/generate_targets.py` to generate the
+   candidate HDF5 oracle when it is absent, then record its hash. Keep the HDF5
+   file private and never use the official `test_data.h5`.
 4. Derive the redacted solver payload and public checks from an allowlist.
 5. Render the fixed strict prompt snapshots.
 

@@ -173,6 +173,10 @@ Perform these actions in order for every revision:
 1. Write the scientific basis, decomposition, provenance, source snapshot,
    reference implementation, independent implementation, wrong
    implementation, oracle generator, and candidate manifest.
+   Run `python authoring/$CANDIDATE_ID/oracle/generate_targets.py` after the
+   reference implementation is frozen whenever `oracle/targets.h5` is absent.
+   Keep that HDF5 file private and never replace it with the official
+   `test_data.h5`.
 2. Derive `public/solver_payload/` from an allowlist. Remove evaluator
    assertions and all private values from the payload.
 3. Render one fixed prompt profile. Store every prompt snapshot and verify
