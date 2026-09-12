@@ -9,6 +9,7 @@ from run_10k_batch import (  # noqa: E402
     BatchConfig,
     BatchRunner,
     Job,
+    build_kimi_command,
     build_config,
     parse_env_file,
     parse_json_output,
@@ -34,6 +35,14 @@ def test_parse_env_file_expands_previous_values(tmp_path):
 def test_parse_json_output_ignores_prefix():
     assert parse_json_output("notice\n{\"status\": \"ok\"}") == {"status": "ok"}
     assert parse_json_output("notice\n[1, 2]") == [1, 2]
+
+
+def test_kimi_command_uses_prompt_mode_without_incompatible_approval_flags():
+    command = build_kimi_command("/opt/kimi", "inspect the candidate")
+    resumed = build_kimi_command("/opt/kimi", "continue", session_id="session-1")
+    assert command == ["/opt/kimi", "--prompt", "inspect the candidate"]
+    assert resumed == ["/opt/kimi", "--session", "session-1", "--prompt", "continue"]
+    assert "--auto" not in command and "--yolo" not in command
 
 
 def test_config_accepts_cli_overrides():

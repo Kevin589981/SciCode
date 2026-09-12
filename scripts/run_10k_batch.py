@@ -123,6 +123,17 @@ def pid_alive(pid: int | None) -> bool:
     return True
 
 
+def build_kimi_command(
+    kimi_bin: str, prompt: str, *, session_id: str | None = None
+) -> list[str]:
+    """Build a prompt-mode invocation accepted by Kimi Code 0.42+."""
+    command = [kimi_bin]
+    if session_id:
+        command.extend(["--session", session_id])
+    command.extend(["--prompt", prompt])
+    return command
+
+
 @dataclass
 class BatchConfig:
     repository_root: str
@@ -506,15 +517,19 @@ candidate artifacts before declaring the candidate complete. Do not push.
             self._fail(job, "maximum authoring rounds reached")
             return
         env = self._child_env(job)
-        command = [self.config.kimi_bin, "--auto"]
         if resume:
             if not job.session_id:
                 job.session_id = self._session_id(job, env)
             if not job.session_id:
                 self._fail(job, "cannot find Kimi Code session for resume")
                 return
-            command.extend(["--session", job.session_id])
-        command.extend(["--prompt", self._author_prompt(job, resume=resume, reason=reason)])
+        # Prompt mode is already non-interactive in the installed Kimi Code
+        # executable. Its approval flags cannot be combined with --prompt.
+        command = build_kimi_command(
+            self.config.kimi_bin,
+            self._author_prompt(job, resume=resume, reason=reason),
+            session_id=job.session_id if resume else None,
+        )
         log_path = self._job_log(job, f"author-round-{job.round + 1}.log")
         log_stream = log_path.open("ab")
         try:
