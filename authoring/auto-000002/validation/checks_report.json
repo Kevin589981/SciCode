@@ -16,7 +16,7 @@
     "provenance_sha256": "3091b9609394441d3f4811e403b5c8538162c7d0d8064bdbcd004a934bd8ef35",
     "prompt_profile": "background",
     "mode": "strict",
-    "created_at": "2026-09-12T03:47:44.919894+00:00",
+    "created_at": "2026-09-12T03:49:41.922261+00:00",
     "source_url": "https://raw.githubusercontent.com/clawpack/pyclaw/master/examples/advection_1d/advection_1d.py",
     "source_commit": "f522337ef75abef1153e2025a204b7ef4f7c5c9f",
     "license": "BSD-3-Clause",
