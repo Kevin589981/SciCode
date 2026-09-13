@@ -62,6 +62,22 @@ Run the focused tests, ruff, a small batch, and the full 10,000-record batch in 
 
 ### Task 6: Commit and hand off
 
-Status: in progress until the implementation commit is created.
+Status: complete.
+
+The implementation is committed on `codex/manual-science-components-10k` and
+pushed to `https://github.com/Kevin589981/SciCode`. A fresh independent clone
+was used on yicloud at `/root/scicode-component-synthesis-10k-v1`; the final
+batch is at `/root/scicode-component-output/manual-components-10k-v1`.
+
+The final remote audit reports 10,000 valid queries, 10,000 unique IDs,
+10,000 unique complete records, 7,217 normalized composition signatures, no
+missing metadata, and no schema errors. SHA-256 hashes are:
+
+```text
+queries.jsonl:        afb3283141e5e3b3036419032bcf26e305ae30d098189bcd806e00861fcce443
+metadata.jsonl:       2c88f7cc680711787e90907c9d20777891eb7392b64fa578a363fee171ee78b5
+manifest.json:        58b54d5a1b8cb1d646806371a9b86b20636a7242c8854ef9648b404f50e5f858
+diversity-report.json:e3a17a8e177b3826193b8da6a3a7dedd9510b131441c1b99a1d8301aff1ae2d1
+```
 
 Commit the catalog, composer, tests, documentation, and generated manifest/report. Leave the independent branch ready for a later answer/oracle stage; do not invoke Kimi Code or the Kimi API in this query-only stage.
