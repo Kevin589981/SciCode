@@ -22,15 +22,11 @@ git fetch --all --prune
 git switch codex/scicode-10k-pipeline
 ```
 
-Set the proxy only while fetching GitHub, arXiv, Hugging Face, or Docker Hub
-sources:
-
-```bash
-export http_proxy=http://httpproxy-headless.kubebrain.svc.lg.shzhisuan.local:3128
-export https_proxy="$http_proxy"
-export HTTP_PROXY="$http_proxy"
-export HTTPS_PROXY="$http_proxy"
-```
+Do not export proxy variables in the controller shell or its runtime
+environment. The batch launcher keeps Kimi Code model traffic direct. When a
+candidate needs GitHub, arXiv, Hugging Face, or Docker Hub, set the proxy only
+on that individual external retrieval command according to `AGENTS.md` and
+remove it when the command ends.
 
 Do not put API keys in shell history, candidate files, or trace manifests. Keep
 `POSTGRES`, `OPENAI_API_KEY`, and any provider-specific key in the yicloud
@@ -42,6 +38,11 @@ assume that the shell provides a `python` executable:
 ```bash
 export SCICODE_PYTHON=/root/scicode-avacore/AvaCore/.venv/bin/python
 ```
+
+For every authoring child, the controller sets `HOME` to its isolated
+`kimi-home` and `PWD` to the allocated candidate worktree. Existing
+`XDG_CONFIG_HOME` and `XDG_CACHE_HOME` values are retained so `gh` and `hf`
+authentication remains available.
 
 When that environment is unavailable, create a project environment with `uv`:
 

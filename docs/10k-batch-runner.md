@@ -45,21 +45,20 @@ MODEL=your-model-name
 POSTGRES=postgresql://user:password@db-host:5432/avacore
 ```
 
-Keep the API key and database password out of this document. For source
-retrieval, let the authoring session use the company proxy only for external
-hosts:
+Keep the API key and database password out of this document. Do not export
+proxy variables in the runtime environment: the batch launcher removes them
+from each Kimi Code child so model traffic remains direct. When an authoring
+session retrieves GitHub, arXiv, Hugging Face, or Docker Hub material, set the
+proxy inline on that external retrieval command exactly as prescribed by
+`AGENTS.md`, then let it expire. The solver-run skill consumes `BASE_URL`,
+`OPENAI_API_KEY`, and `POSTGRES`; the authoring prompt never contains their
+values. A simple connectivity check uses the same `BASE_URL` and key, but it
+does not replace a complete AvaCore run.
 
-```bash
-HTTP_PROXY=http://httpproxy-headless.kubebrain.svc.lg.shzhisuan.local:3128
-HTTPS_PROXY=$HTTP_PROXY
-NO_PROXY=localhost,127.0.0.1,.cn,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.cluster.local,.svc
-```
-
-Domestic and internal destinations stay direct. Include the model host and
-database host in `NO_PROXY` when they are reachable internally. The solver-run
-skill consumes `BASE_URL`, `OPENAI_API_KEY`, and `POSTGRES`; the authoring
-prompt never contains their values. A simple connectivity check uses the same
-`BASE_URL` and key, but it does not replace a complete AvaCore run.
+Each child receives its allocated worktree as both its process `PWD` and its
+isolated Kimi Code `HOME`. Existing `XDG_CONFIG_HOME` and `XDG_CACHE_HOME`
+settings remain available so authenticated `gh` and Hugging Face commands can
+continue to use the configured credentials.
 
 Important settings:
 

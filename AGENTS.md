@@ -57,6 +57,8 @@ set `UV_BIN="${UV_BIN:-/root/.local/bin/uv}"`, create a local environment with
    `http_proxy`, `https_proxy`, `HTTP_PROXY`, and `HTTPS_PROXY` to
    `http://httpproxy-headless.kubebrain.svc.lg.shzhisuan.local:3128` for the
    retrieval command only.
+   Do not export these proxy variables for the authoring session or its
+   controller; set them inline only on the external retrieval command.
 7. Preserve `no_proxy` and `NO_PROXY` entries for localhost, private network
    ranges, cluster-local services, internal model hosts, and domestic domains.
    Remove the temporary source proxy variables after retrieval when the shell

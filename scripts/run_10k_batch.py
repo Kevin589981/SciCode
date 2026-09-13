@@ -42,6 +42,22 @@ SCHEMA = "scicode-batch-run-v1"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,48}$")
 ENV_REFERENCE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
 TERMINAL_STAGES = {"done", "failed"}
+PROXY_ENV_NAMES = frozenset(
+    {
+        "ALL_PROXY",
+        "all_proxy",
+        "FTP_PROXY",
+        "ftp_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy",
+        "RSYNC_PROXY",
+        "rsync_proxy",
+    }
+)
 
 
 def now() -> str:
@@ -417,10 +433,20 @@ class BatchRunner:
         return target
 
     def _child_env(self, job: Job) -> dict[str, str]:
-        env = dict(self.base_env)
+        # Model traffic must stay direct.  External source commands set their
+        # own proxy variables inline according to AGENTS.md.
+        base_env = getattr(self, "base_env", os.environ)
+        env = {
+            name: value
+            for name, value in base_env.items()
+            if name not in PROXY_ENV_NAMES
+        }
         home = self._prepare_kimi_home(job)
         if home is not None:
+            home = home.resolve()
             env["KIMI_CODE_HOME"] = str(home)
+            env["HOME"] = str(home)
+        env["PWD"] = str(Path(job.worktree_path).expanduser().resolve())
         env["SCICODE_BATCH_ID"] = self.batch_id
         env["SCICODE_CANDIDATE_ID"] = job.candidate_id
         env["SCICODE_CANDIDATE_DIR"] = str(job.candidate_dir)
@@ -595,7 +621,24 @@ candidate artifacts before declaring the candidate complete. Do not push.
         paths = list(job.candidate_dir.glob("runs/*/handoff.json"))
         if not paths:
             return None
-        return max(paths, key=lambda path: path.stat().st_mtime_ns)
+
+        def sort_key(path: Path) -> tuple[str, int, int, str]:
+            try:
+                value = read_json(path)
+            except (OSError, ValueError):
+                value = {}
+            submitted_at = value.get("submitted_at")
+            if not isinstance(submitted_at, str):
+                submitted_at = ""
+            try:
+                metadata = path.stat()
+                modified = metadata.st_mtime_ns
+                created = metadata.st_ctime_ns
+            except OSError:
+                modified = created = 0
+            return (submitted_at, modified, created, path.as_posix())
+
+        return max(paths, key=sort_key)
 
     def _handoff_for_run(self, job: Job, run_id: str | None) -> Path | None:
         """Find the handoff whose recorded run id matches ``run_id``."""

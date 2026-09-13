@@ -101,7 +101,7 @@ def test_config_defaults_are_operator_side_only():
     assert config.target_samples == 10_000
 
 
-def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
+def test_child_env_isolates_home_and_strips_default_proxy_variables(tmp_path):
     runner = object.__new__(BatchRunner)
     runner.base_env = {
         "API_KEY": "secret",
@@ -110,7 +110,14 @@ def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
         "KIMI_MODEL": "wrong-dynamic-alias",
         "KIMI_MODEL_BASE_URL": "http://wrong-model-host/v1",
         "HTTP_PROXY": "http://source-proxy",
+        "http_proxy": "http://source-proxy",
+        "HTTPS_PROXY": "http://source-proxy",
+        "https_proxy": "http://source-proxy",
+        "ALL_PROXY": "http://source-proxy",
         "NO_PROXY": "localhost,.cn",
+        "RSYNC_PROXY": "source-proxy:3128",
+        "XDG_CONFIG_HOME": "/root/.config",
+        "XDG_CACHE_HOME": "/root/.cache",
     }
     runner.config = BatchConfig(
         repository_root="/repo",
@@ -119,6 +126,8 @@ def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
         batch_root="/batches",
     )
     runner.batch_id = "batch-1"
+    isolated_home = tmp_path / "job-home"
+    runner._prepare_kimi_home = lambda _job: isolated_home
     job = Job(
         candidate_id="auto-000001",
         index=1,
@@ -131,8 +140,21 @@ def test_child_env_maps_runtime_provider_aliases_without_serializing_values():
     assert env["OPENAI_API_KEY"] == "secret"
     assert env["MODEL"] == "model-name"
     assert env["BASE_URL"] == "http://model.internal/v1"
-    assert env["HTTP_PROXY"] == "http://source-proxy"
-    assert env["NO_PROXY"] == "localhost,.cn"
+    assert env["HOME"] == str(isolated_home.resolve())
+    assert env["PWD"] == str(Path(job.worktree_path).resolve())
+    for name in (
+        "ALL_PROXY",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "RSYNC_PROXY",
+        "all_proxy",
+        "http_proxy",
+        "https_proxy",
+    ):
+        assert name not in env
+    assert env["XDG_CONFIG_HOME"] == "/root/.config"
+    assert env["XDG_CACHE_HOME"] == "/root/.cache"
     assert "KIMI_MODEL" not in env
     assert "KIMI_MODEL_BASE_URL" not in env
     assert not any(name.startswith("KIMI_MODEL_") for name in env)
