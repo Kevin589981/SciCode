@@ -1,9 +1,17 @@
 # Local Query Synthesis
 
 This branch creates the question side of a SciCode-style dataset without
-calling Kimi or any other model. The generator is deterministic and uses a
-catalog of parameterized scientific computation blueprints. Kimi API calls are
-reserved for the later answer and trace stage.
+calling Kimi Code, Kimi, or any other model. The generator is deterministic
+and uses a hand-authored catalog of scientific components. Each recipe is
+composed from a domain phenomenon, a numerical/statistical method, an
+observation scenario, a diagnostic, and a design-focus variant. Kimi API calls
+are reserved for the later answer and trace stage.
+
+The active catalog contains 30 reviewable recipes across physics, chemistry,
+materials, biology, astronomy, geoscience, statistics, and signal analysis.
+It also contains 12 observation scenarios, 57 method modes, 8 diagnostic
+families, and 20 design-focus variants. These are semantic prompt components;
+numeric values are only one part of the variation.
 
 ## Record Shape
 
@@ -41,7 +49,7 @@ The command writes:
 
 ```text
 queries.jsonl    SciCode-compatible problem records
-metadata.jsonl   Blueprint, seed, subproblem count, and record hash
+metadata.jsonl   Component IDs, provenance, composition signature, seed, and record hash
 errors.jsonl     Builder/schema failures, if any
 manifest.json    Counts and an explicit zero-model-call declaration
 ```
@@ -49,6 +57,21 @@ manifest.json    Counts and an explicit zero-model-call declaration
 The target counts top-level problem records. The manifest also reports the
 total number of generated subproblems. Re-running with the same output
 directory resumes from the next unused id and does not duplicate records.
+
+Run the batch audit after synthesis:
+
+```bash
+python scripts/diversity_report.py \
+  runs/manual-components-10k/queries.jsonl \
+  --metadata-file runs/manual-components-10k/metadata.jsonl \
+  --output runs/manual-components-10k/diversity-report.json
+```
+
+The audit validates every query, checks exact-record and ID uniqueness, and
+reports component, domain, subdomain, method, scenario, diagnostic, design
+variant, step-count, and public-test-layout distributions. Repeated
+normalized signatures are reported as a warning because parameterized records
+may share a semantic skeleton; exact duplicate records are a failure.
 
 ## Inspect
 

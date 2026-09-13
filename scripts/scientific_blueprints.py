@@ -628,3 +628,34 @@ def build_blueprint(problem_id: str, index: int, seed: int = 0) -> tuple[dict[st
 
 
 __all__ = ["BLUEPRINTS", "Blueprint", "build_blueprint"]
+
+
+# The legacy seven builders above remain in the file for backwards-readable
+# history, but the active catalog for this branch is the hand-authored
+# component catalog.  Keeping the public names avoids breaking callers that
+# import ``BLUEPRINTS`` or ``build_blueprint`` from the original scaffold.
+try:  # pragma: no cover - the package and script forms are both supported.
+    from .scientific_components import RECIPES, render_component_query
+except ImportError:  # pragma: no cover
+    from scientific_components import RECIPES, render_component_query
+
+
+def _component_builder(component_index: int):
+    def builder(problem_id: str, _rng: Random) -> dict[str, object]:
+        query, _metadata = render_component_query(problem_id, component_index, seed=0)
+        return query
+
+    return builder
+
+
+BLUEPRINTS = tuple(
+    Blueprint(RECIPES[index].key, _component_builder(index))
+    for index in range(len(RECIPES))
+)
+
+
+def build_blueprint(problem_id: str, index: int, seed: int = 0) -> tuple[dict[str, object], str]:
+    """Build a query from the active hand-authored component catalog."""
+
+    query, metadata = render_component_query(problem_id, index, seed=seed)
+    return query, str(metadata["component"])

@@ -5,6 +5,16 @@
 
 This repo contains the evaluation code for the paper "[SciCode: A Research Coding Benchmark Curated by Scientists](https://arxiv.org/abs/2407.13168)"
 
+## Local component query synthesis
+
+The `codex/manual-science-components-10k` branch adds a question-only,
+model-free synthesizer. It keeps the original SciCode JSONL record shape and
+combines 30 hand-authored scientific recipes with method, scenario,
+diagnostic, and design-focus components. It does not read the official
+SciCode dataset and does not call Kimi or Kimi Code; those calls belong to the
+later answer/trace stage. See `docs/local-query-synthesis.md` for generation
+and batch-audit commands.
+
 ## 🔔News
 
 **[2025-02-17]: SciCode benchmark is available at [HuggingFace Datasets](https://huggingface.co/datasets/SciCode1/SciCode)!**

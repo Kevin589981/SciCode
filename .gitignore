@@ -6,6 +6,7 @@ keys.cfg
 eval/logs/**
 *.h5
 logs/**
+runs/**
 **/logs/**
 **/tmp/**
 integration/**

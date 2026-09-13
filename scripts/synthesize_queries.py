@@ -15,9 +15,11 @@ from typing import Any
 try:  # Works as a script and when imported by tests.
     from .query_schema import QuerySchemaError, validate_query
     from .scientific_blueprints import build_blueprint
+    from .scientific_components import catalog_summary, render_component_query
 except ImportError:  # pragma: no cover
     from query_schema import QuerySchemaError, validate_query
     from scientific_blueprints import build_blueprint
+    from scientific_components import catalog_summary, render_component_query
 
 
 def utc_now() -> str:
@@ -99,7 +101,7 @@ class QuerySynthesizer:
         next_index: int,
     ) -> dict[str, Any]:
         value = {
-            "schema": "scicode-local-query-synthesis-v1",
+            "schema": "scicode-local-query-synthesis-v2",
             "status": status,
             "started_at": started_at,
             "updated_at": utc_now(),
@@ -109,10 +111,11 @@ class QuerySynthesizer:
             "rejected_queries": rejected,
             "subproblem_count": subproblems,
             "next_index": next_index,
-            "generation_method": "deterministic_scientific_blueprints",
+            "generation_method": "hand_authored_component_composition",
             "model_calls": 0,
             "kimi_api_calls": 0,
             "official_scicode_dataset_read": False,
+            "catalog": catalog_summary(),
             "config": {
                 "target_queries": self.config.target_queries,
                 "output_dir": str(self.config.output_dir),
@@ -171,7 +174,17 @@ class QuerySynthesizer:
                 next_index += 1
                 attempted += 1
                 try:
-                    query, blueprint = build_blueprint(query_id, next_index - 2, self.config.seed)
+                    # Keep the public builder hook for callers/tests that
+                    # inject a failing builder, then obtain the richer
+                    # component metadata from the same deterministic render.
+                    query, _blueprint = build_blueprint(
+                        query_id, next_index - 2, self.config.seed
+                    )
+                    _metadata_query, metadata = render_component_query(
+                        query_id, next_index - 2, self.config.seed
+                    )
+                    if query != _metadata_query:
+                        raise ValueError("builder and component renderer diverged")
                     validate_query(query)
                 except (QuerySchemaError, ValueError, TypeError) as exc:
                     rejected += 1
@@ -180,7 +193,7 @@ class QuerySynthesizer:
                         {
                             "query_id": query_id,
                             "error": str(exc),
-                            "generation_method": "deterministic_scientific_blueprints",
+                            "generation_method": "hand_authored_component_composition",
                         },
                     )
                     continue
@@ -189,10 +202,10 @@ class QuerySynthesizer:
                     self.metadata_path,
                     {
                         "query_id": query_id,
-                        "blueprint": blueprint,
                         "seed": self.config.seed,
                         "subproblem_count": len(query["sub_steps"]),
                         "query_sha256": json_hash(query),
+                        **metadata,
                     },
                 )
                 accepted_ids.add(query_id)
