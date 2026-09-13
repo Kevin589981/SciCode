@@ -198,6 +198,107 @@ class RunningProcess:
         return None
 
 
+def _runner_for_authoring_retry(tmp_path, job):
+    runner = object.__new__(BatchRunner)
+    runner.processes = {job.candidate_id: FinishedProcess(code=1)}
+    runner.log_streams = {}
+    runner.jobs = {job.candidate_id: job}
+    runner.config = BatchConfig(
+        repository_root=str(tmp_path / "repo"),
+        workspace_root=str(tmp_path / "workspace"),
+        delivery_root=str(tmp_path / "delivery"),
+        batch_root=str(tmp_path / "batches"),
+        max_rounds=6,
+    )
+    runner.batch_id = "batch-1"
+    return runner
+
+
+def test_provider_404_retries_same_authoring_session(tmp_path):
+    job_root = tmp_path / "job"
+    job = Job(
+        candidate_id="auto-000001",
+        index=1,
+        worktree_path=str(tmp_path / "worktree"),
+        branch="author/auto-000001",
+        allocation_path=str(tmp_path / "allocation.json"),
+        job_root=str(job_root),
+        round=1,
+        stage="authoring",
+    )
+    job_root.mkdir(parents=True)
+    (job_root / "author-round-1.log").write_text(
+        "error: failed to run prompt: provider.api_error: 404 status code (no body)\n",
+        encoding="utf-8",
+    )
+    runner = _runner_for_authoring_retry(tmp_path, job)
+    launches = []
+    runner._launch = lambda current, *, resume, reason=None: launches.append(
+        (current.candidate_id, resume, reason)
+    )
+
+    runner._advance(job)
+
+    assert job.stage == "authoring"
+    assert job.stage != "failed"
+    assert launches and launches[0][0:2] == ("auto-000001", True)
+
+
+def test_non_provider_authoring_exit_still_fails(tmp_path):
+    job_root = tmp_path / "job"
+    job = Job(
+        candidate_id="auto-000001",
+        index=1,
+        worktree_path=str(tmp_path / "worktree"),
+        branch="author/auto-000001",
+        allocation_path=str(tmp_path / "allocation.json"),
+        job_root=str(job_root),
+        round=1,
+        stage="authoring",
+    )
+    job_root.mkdir(parents=True)
+    (job_root / "author-round-1.log").write_text(
+        "error: failed to run prompt: candidate validation failed\n",
+        encoding="utf-8",
+    )
+    runner = _runner_for_authoring_retry(tmp_path, job)
+    launches = []
+    runner._launch = lambda **kwargs: launches.append(kwargs)
+
+    runner._advance(job)
+
+    assert job.stage == "failed"
+    assert launches == []
+    assert "exited with code 1" in (job.error or "")
+
+
+def test_non_retryable_provider_400_still_fails(tmp_path):
+    job_root = tmp_path / "job"
+    job = Job(
+        candidate_id="auto-000001",
+        index=1,
+        worktree_path=str(tmp_path / "worktree"),
+        branch="author/auto-000001",
+        allocation_path=str(tmp_path / "allocation.json"),
+        job_root=str(job_root),
+        round=1,
+        stage="authoring",
+    )
+    job_root.mkdir(parents=True)
+    (job_root / "author-round-1.log").write_text(
+        "error: failed to run prompt: provider.api_error: 400 status code (bad request)\n",
+        encoding="utf-8",
+    )
+    runner = _runner_for_authoring_retry(tmp_path, job)
+    launches = []
+    runner._launch = lambda **kwargs: launches.append(kwargs)
+
+    runner._advance(job)
+
+    assert job.stage == "failed"
+    assert launches == []
+
+
 def _write_handoff(path, run_id):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

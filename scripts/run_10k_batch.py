@@ -43,6 +43,20 @@ SCHEMA = "scicode-batch-run-v1"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,48}$")
 ENV_REFERENCE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
 TERMINAL_STAGES = {"done", "failed"}
+RETRYABLE_PROVIDER_STATUS = re.compile(
+    r"(?:status\s+code\s*(?:is\s*)?(?:404|408|409|425|429|5\d\d)\b|"
+    r"(?:404|408|409|425|429|5\d\d)\s+status\s+code\b|"
+    r"http\s+status\s*(?:is\s*)?(?:404|408|409|425|429|5\d\d)\b)",
+    re.IGNORECASE,
+)
+RETRYABLE_PROVIDER_MARKERS = (
+    "provider.api_error",
+    "apitimeouterror",
+    "connectionerror",
+    "connection reset",
+    "connection aborted",
+    "temporarily unavailable",
+)
 PROXY_ENV_NAMES = frozenset(
     {
         "ALL_PROXY",
@@ -948,6 +962,32 @@ candidate artifacts before declaring the candidate complete. Do not push.
         log_path = self._job_log(job, "failure.txt")
         log_path.write_text(message + "\n", encoding="utf-8")
 
+    def _authoring_failure_is_retryable(self, job: Job) -> bool:
+        """Classify provider failures without retrying arbitrary author errors."""
+        if job.round < 1:
+            return False
+        path = Path(job.job_root) / f"author-round-{job.round}.log"
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")[-32_000:]
+        except OSError:
+            return False
+        lowered = text.lower()
+        if "failed to run prompt" not in lowered:
+            return False
+        if "provider.api_error" in lowered:
+            return bool(RETRYABLE_PROVIDER_STATUS.search(text))
+        return any(
+            marker in lowered
+            for marker in RETRYABLE_PROVIDER_MARKERS
+            if marker != "provider.api_error"
+        )
+
+    def _retry_authoring(self, job: Job, reason: str) -> bool:
+        if job.round >= self.config.max_rounds:
+            return False
+        self._launch(job, resume=True, reason=reason)
+        return job.stage not in TERMINAL_STAGES
+
     def _advance(self, job: Job) -> None:
         if not job.active:
             return
@@ -959,6 +999,12 @@ candidate artifacts before declaring the candidate complete. Do not push.
             if not process_finished:
                 return
             if job.last_exit_code not in (None, 0) and handoff is None:
+                if self._authoring_failure_is_retryable(job) and self._retry_authoring(
+                    job,
+                    "The previous Kimi Code turn failed in the provider transport. "
+                    "Resume the same session and retry the interrupted authoring turn.",
+                ):
+                    return
                 self._fail(job, f"authoring process exited with code {job.last_exit_code} before handoff")
                 return
             if handoff is not None:
@@ -1000,6 +1046,12 @@ candidate artifacts before declaring the candidate complete. Do not push.
                 self._deliver(job)
                 return
             if job.last_exit_code not in (None, 0):
+                if self._authoring_failure_is_retryable(job) and self._retry_authoring(
+                    job,
+                    "The previous review turn failed in the provider transport. "
+                    "Resume the same session and retry the interrupted turn.",
+                ):
+                    return
                 self._fail(job, f"review process exited with code {job.last_exit_code}")
                 return
             if job.round < self.config.max_rounds:

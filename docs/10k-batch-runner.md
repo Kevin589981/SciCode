@@ -85,6 +85,7 @@ Important settings:
 | `target_samples` | Number of accepted subproblem/trace rows. |
 | `max_candidates` | Optional safety cap on allocated candidates. |
 | `max_rounds` | Maximum authoring/resume process launches per candidate. |
+| provider retry | A provider transport error such as HTTP 404, 408, 429, or 5xx resumes the same Kimi Code session until `max_rounds`; it does not create a replacement candidate. |
 | `run_timeout_seconds` | Maximum wait for a closed solver run manifest. |
 | `merge_accepted` | Merge committed accepted branches under the delivery lock. |
 | `cleanup_worktrees` | Remove only successfully merged worktree copies. |
