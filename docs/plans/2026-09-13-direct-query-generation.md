@@ -1,51 +1,64 @@
-# Direct SciCode Query Generation Implementation Plan
+# Local SciCode Query Synthesis Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Generate a configurable set of SciCode-shaped problem queries directly through an OpenAI-compatible chat endpoint, without starting Kimi Code or an authoring worktree for each query.
+**Goal:** Generate 10,000 SciCode-compatible problem queries locally, without calling Kimi or any other model during query creation; reserve model calls for the later answer stage.
 
-**Architecture:** A stateless concurrent producer assigns a stable query id before each request, sends a minimal schema-oriented generation prompt, and writes the raw provider response separately from structurally accepted query records. The producer performs only parsing and shape checks needed to create valid SciCode records; scientific review, reference answers, private tests, HDF5 oracles, and traces remain later stages.
+**Architecture:** A deterministic catalog of scientific task blueprints expands into independent parameterized problem records. Each record is emitted directly in the original SciCode JSONL shape, with no answer, reference implementation, oracle, or trace. A lightweight schema validator checks only transport compatibility; scientific review and answer generation remain separate downstream stages.
 
-**Tech Stack:** Python 3.10+, standard-library `urllib`/`json`, `ThreadPoolExecutor`, JSONL, pytest.
+**Tech Stack:** Python 3.10+, standard-library `json`, `hashlib`, `random`, JSONL, pytest.
 
 ---
 
-### Task 1: Define the direct-generation contract
+### Task 1: Freeze the query-only contract
+
+Status: complete.
 
 **Files:**
-- Create: `docs/plans/2026-09-13-direct-query-generation.md`
-- Create: `docs/direct-query-generation.md`
+- Modify: `docs/plans/2026-09-13-direct-query-generation.md`
+- Create: `docs/local-query-synthesis.md`
 
-Document that one generated query is one top-level SciCode problem record. Record the original eight top-level fields and six sub-step fields, explain that answers/oracles/traces are intentionally deferred, and document the environment variables and output files without exposing credentials.
+Document that the unit is one top-level SciCode problem record, preserve the eight original top-level fields and six sub-step fields, and explicitly state that Kimi/API calls, answers, oracle values, and traces are out of scope for this stage.
 
-### Task 2: Add the query parser and structural validator
+### Task 2: Implement the schema validator
 
-**Files:**
-- Create: `scripts/generate_queries.py`
-- Create: `tests/test_generate_queries.py`
-
-Implement extraction of a JSON object from a plain or fenced model response, validation against the original SciCode field names and types, contiguous step numbering, and rejection records. Do not add scientific-quality rules to the generation prompt or validator beyond the structural contract.
-
-### Task 3: Add the OpenAI-compatible producer
+Status: complete.
 
 **Files:**
-- Modify: `scripts/generate_queries.py`
-- Modify: `tests/test_generate_queries.py`
+- Create: `scripts/query_schema.py`
+- Create: `tests/test_query_schema.py`
 
-Implement configurable endpoint, model, temperature, token limit, timeout, retries, concurrency, target count, output directory, and resume behavior. Assign ids before requests, preserve raw responses and usage metadata, use atomic per-record writes under a lock, and keep secrets out of manifests.
+Implement a dependency-free validator for the original field names, string/list types, non-empty ordered substeps, stable problem ids, and absence of generated answer-only fields. Do not evaluate scientific correctness or difficulty here.
 
-### Task 4: Verify locally with a mock provider
+### Task 3: Implement parameterized scientific blueprints
+
+Status: complete.
 
 **Files:**
-- Modify: `tests/test_generate_queries.py`
+- Create: `scripts/scientific_blueprints.py`
+- Create: `tests/test_scientific_blueprints.py`
 
-Cover valid plain JSON, fenced JSON, malformed responses, retryable HTTP errors, request timeout handling, resume without duplicate ids, usage/finish metadata preservation, and concurrent target accounting using an in-process mock HTTP server or injected transport.
+Add a catalog of multi-step scientific computation families spanning numerical methods, simulation, physics, chemistry, biology, materials, and signal/data analysis. Each blueprint must produce a complete SciCode-shaped record with parameterized units, assumptions, function headers, test snippets using the evaluator's `target` placeholder, and no reference answer.
 
-### Task 5: Run a small real smoke
+### Task 4: Implement the local batch writer
 
-Run the producer for a small count against the configured direct endpoint, inspect `queries.jsonl`, `responses.jsonl`, `rejected.jsonl`, and `manifest.json`, and verify that no Kimi Code process, worktree, answer, oracle, or trace is created.
+Status: complete.
 
-### Task 6: Start the 10k query batch
+**Files:**
+- Create: `scripts/synthesize_queries.py`
+- Create: `tests/test_synthesize_queries.py`
 
-Clone this branch into a fresh yicloud checkout with a new `.git`, configure the deployed chat endpoint and model through environment variables, start the producer detached with the requested target of 10,000 queries, and record the batch directory and monitoring command. Do not mix this output with the older Kimi Code candidate batch.
+Generate stable ids and deterministic records from a seed, write `queries.jsonl` and a separate `metadata.jsonl`, support resume without duplicate ids, write an atomic manifest, and verify the exact requested count. The writer must not import or invoke an HTTP client, Kimi Code, or the official SciCode dataset.
 
+### Task 5: Verify locally
+
+Status: complete. The focused suite passes and a local 10,000-record run
+produced 10,000 valid records, 30,000 ordered subproblems, and zero model calls.
+
+Run the focused test suite, generate a small deterministic batch, validate every record, inspect representative domains and subproblem counts, and confirm that no answer/oracle/trace files are produced.
+
+### Task 6: Start the 10k batch
+
+Status: in progress.
+
+Commit and push this branch, clone it into a fresh yicloud checkout with an independent `.git`, run the local synthesizer for 10,000 queries in a detached process, and record the output manifest and monitoring command. Keep the existing Kimi Code batch separate and untouched; Kimi is used only in the later answer synthesis stage.
