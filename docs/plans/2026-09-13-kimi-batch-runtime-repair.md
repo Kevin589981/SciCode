@@ -22,11 +22,30 @@
 - [x] Verify the patched child with a short `strace`/workspace probe: only the isolated Kimi home and allocated worktree may be watched.
 - [x] Run the repository's focused tests and lint checks on the patched branch.
 - [x] Stabilize latest-handoff selection when filesystem timestamps tie on Windows.
-- [ ] Commit the focused change, push the branch to `Kevin589981/SciCode`, and fast-forward the yicloud checkout to the same commit.
-- [ ] Remove the old batch's allocated worktrees only after archiving a manifest of their paths and preserving state/log evidence; do not delete unrelated worktrees.
-- [ ] Create a new batch root and delivery root with a fresh batch identifier; run a one-worker smoke and inspect the first Kimi request before scaling.
-- [ ] Confirm direct model routing, valid `gh`/`hf` access, correct watcher paths, and successful first handoff in the new batch.
+- [x] Commit the focused change, push the branch to `Kevin589981/SciCode`, and fast-forward a clean yicloud checkout to the same commit.
+- [x] Remove the old batch's allocated worktrees only after archiving a manifest of their paths and preserving state/log evidence; do not delete unrelated worktrees.
+- [x] Create a separate smoke root and run one worker; inspect the first Kimi requests before scaling (the smoke was stopped after the direct-route probe, with artifacts retained).
+- [x] Confirm direct model routing, valid `gh`/`hf` access under the isolated child `HOME`, and correct watcher/worktree paths; defer the solver handoff check to the formal batch.
+- [ ] Remove the tracked historical candidate from the clean-batch baseline while retaining it in Git history, then sync that baseline to yicloud.
+- [ ] Raise only the host inotify-instance ceiling required for the requested 500 concurrent Kimi Code processes; do not impose a memory limit.
+- [ ] Create the formal 1000-sample/500-worker batch with a fresh identifier and inspect its first handoff and child environments.
 - [ ] Scale the clean batch only after the smoke passes; do not change memory limits, add Docker, or alter the strict solver contract.
+
+## Recorded evidence
+
+- `gh auth status`, `gh api user`, and `hf auth list` succeed when `HOME` points
+  at a fresh per-task directory while `XDG_CONFIG_HOME=/root/.config` and
+  `XDG_CACHE_HOME=/root/.cache` are retained. `hf auth whoami` succeeds when
+  the proxy is scoped to that external command.
+- The previous batch left 1462 manifest rows. Its cleanup manifest and report
+  are retained under the old batch directory; 1419 directories were removed,
+  43 were already absent, and no cleanup operation failed.
+- A direct request to the internal solver endpoint returned HTTP 200; the same
+  request through the external-source proxy returned HTTP 502/EOF. The batch
+  launcher therefore strips proxy variables from model children.
+- The host currently exposes `fs.inotify.max_user_instances=128`; each Kimi
+  Code child consumes an inotify instance, so the 500-worker batch needs a
+  larger host ceiling before launch.
 
 ## Verification commands
 
