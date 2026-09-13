@@ -29,8 +29,8 @@
 - [x] Remove the tracked historical candidate from the clean-batch baseline while retaining it in Git history, then sync that baseline to yicloud.
 - [x] Raise only the host inotify-instance ceiling required for the requested 500 concurrent Kimi Code processes; do not impose a memory limit.
 - [x] Create the formal 1000-sample/500-worker batch, verify its child environment, then stop it before changing the Git allocation strategy.
-- [ ] Add a per-batch independent Git mirror on a low-latency filesystem and verify its commit and remote isolation.
-- [ ] Start the fresh 1000-sample/500-worker batch from that mirror and inspect its first handoff and child environments.
+- [x] Add a per-batch independent Git mirror on a low-latency filesystem and verify its commit and remote isolation.
+- [ ] Start the fresh 1000-sample/500-worker batch from that mirror and inspect its first complete handoff; its child environments and direct routing are already verified.
 - [ ] Scale the mirror-backed batch only after its smoke passes; do not change memory limits, add Docker, or alter the strict solver contract.
 
 ## Recorded evidence
@@ -51,6 +51,12 @@
 - The formal batch reached 174 candidates with no failures before it was
   stopped. `git worktree add` was waiting on metadata reads under the shared
   virtiofs `.git/worktrees` registry; the new batch must use its own mirror.
+- The mirror probe cloned commit `54341c1` onto XFS, had zero remotes, and was
+  removed after verification. The replacement batch pinned the same commit in
+  `/var/lib/scicode-git-mirrors/scicode-batches/<batch-id>`.
+- The replacement batch reached 178 authoring candidates with zero controller
+  errors; its first child worktree points to the XFS mirror and its model
+  socket is direct. A complete solver handoff is still pending.
 
 ## Verification commands
 
