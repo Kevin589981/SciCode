@@ -26,10 +26,12 @@
 - [x] Remove the old batch's allocated worktrees only after archiving a manifest of their paths and preserving state/log evidence; do not delete unrelated worktrees.
 - [x] Create a separate smoke root and run one worker; inspect the first Kimi requests before scaling (the smoke was stopped after the direct-route probe, with artifacts retained).
 - [x] Confirm direct model routing, valid `gh`/`hf` access under the isolated child `HOME`, and correct watcher/worktree paths; defer the solver handoff check to the formal batch.
-- [ ] Remove the tracked historical candidate from the clean-batch baseline while retaining it in Git history, then sync that baseline to yicloud.
-- [ ] Raise only the host inotify-instance ceiling required for the requested 500 concurrent Kimi Code processes; do not impose a memory limit.
-- [ ] Create the formal 1000-sample/500-worker batch with a fresh identifier and inspect its first handoff and child environments.
-- [ ] Scale the clean batch only after the smoke passes; do not change memory limits, add Docker, or alter the strict solver contract.
+- [x] Remove the tracked historical candidate from the clean-batch baseline while retaining it in Git history, then sync that baseline to yicloud.
+- [x] Raise only the host inotify-instance ceiling required for the requested 500 concurrent Kimi Code processes; do not impose a memory limit.
+- [x] Create the formal 1000-sample/500-worker batch, verify its child environment, then stop it before changing the Git allocation strategy.
+- [ ] Add a per-batch independent Git mirror on a low-latency filesystem and verify its commit and remote isolation.
+- [ ] Start the fresh 1000-sample/500-worker batch from that mirror and inspect its first handoff and child environments.
+- [ ] Scale the mirror-backed batch only after its smoke passes; do not change memory limits, add Docker, or alter the strict solver contract.
 
 ## Recorded evidence
 
@@ -46,6 +48,9 @@
 - The host currently exposes `fs.inotify.max_user_instances=128`; each Kimi
   Code child consumes an inotify instance, so the 500-worker batch needs a
   larger host ceiling before launch.
+- The formal batch reached 174 candidates with no failures before it was
+  stopped. `git worktree add` was waiting on metadata reads under the shared
+  virtiofs `.git/worktrees` registry; the new batch must use its own mirror.
 
 ## Verification commands
 

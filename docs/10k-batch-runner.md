@@ -60,6 +60,23 @@ isolated Kimi Code `HOME`. Existing `XDG_CONFIG_HOME` and `XDG_CACHE_HOME`
 settings remain available so authenticated `gh` and Hugging Face commands can
 continue to use the configured credentials.
 
+Set `mirror_root` when the source checkout is shared by more than one batch:
+
+```json
+{
+  "repository_root": "/root/scicode-authoring/repository-clean",
+  "mirror_root": "/var/lib/scicode-git-mirrors"
+}
+```
+
+At batch creation the controller clones the clean `integration_branch` into
+`<mirror_root>/<batch-id>` with `--no-hardlinks`, verifies the source commit,
+removes the clone's origin, and records the source and mirror identities in
+`state.json`. All candidate worktrees for that batch are created from this
+mirror. Resuming a batch reuses the recorded mirror and never creates a second
+one. Put the mirror root on local XFS or another low-latency filesystem when
+the candidate workspace is on a network-mounted path.
+
 Important settings:
 
 | Setting | Meaning |
@@ -72,6 +89,7 @@ Important settings:
 | `merge_accepted` | Merge committed accepted branches under the delivery lock. |
 | `cleanup_worktrees` | Remove only successfully merged worktree copies. |
 | `drain` | Let active candidates finish after the target is reached. |
+| `mirror_root` | Parent directory for one independent Git mirror per batch. |
 
 ## Start
 

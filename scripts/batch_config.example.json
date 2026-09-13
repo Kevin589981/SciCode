@@ -1,5 +1,6 @@
 {
   "repository_root": "/root/scicode-authoring/repository",
+  "mirror_root": "/var/lib/scicode-git-mirrors",
   "workspace_root": "/root/scicode-authoring",
   "batch_root": "/root/scicode-authoring/batches",
   "delivery_root": "/root/scicode-authoring/delivery",

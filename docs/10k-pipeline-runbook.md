@@ -54,6 +54,12 @@ export UV_BIN="${UV_BIN:-/root/.local/bin/uv}"
 export SCICODE_PYTHON="$PWD/.venv/bin/python"
 ```
 
+Set `mirror_root` in the batch JSON to a local XFS path, for example
+`/var/lib/scicode-git-mirrors`. The controller creates one independent mirror
+per batch from the clean integration branch and uses only that mirror for
+candidate worktrees. The source checkout must be clean; the selected source
+commit and mirror path are recorded in `state.json` and reused on resume.
+
 ## Start Kimi Code authoring
 
 Run Kimi Code from the repository checkout. Give it one candidate id and tell

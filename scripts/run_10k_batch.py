@@ -30,6 +30,7 @@ if str(REPOSITORY_ROOT / "src") not in sys.path:
 
 from scicode.pipeline.candidate import CandidateValidationError  # noqa: E402
 from scicode.pipeline.pipeline import PipelineError  # noqa: E402
+from scicode.pipeline.mirror import MirrorError, prepare_batch_mirror  # noqa: E402
 from scicode.pipeline.worktree import (  # noqa: E402
     CandidateLock,
     WorktreeAllocation,
@@ -171,6 +172,9 @@ class BatchConfig:
     merge_accepted: bool = False
     cleanup_worktrees: bool = False
     drain: bool = True
+    mirror_root: str | None = None
+    mirror_source_repository: str | None = None
+    mirror_source_commit: str | None = None
 
     def validate(self) -> None:
         if not ID_PATTERN.fullmatch(self.candidate_prefix):
@@ -285,13 +289,23 @@ def build_config(args: argparse.Namespace) -> BatchConfig:
         merge_accepted=bool(_pick(args, file_config, "merge_accepted", False)),
         cleanup_worktrees=bool(_pick(args, file_config, "cleanup_worktrees", False)),
         drain=False if args.no_drain else bool(file_config.get("drain", True)),
+        mirror_root=_pick(args, file_config, "mirror_root", None),
+        mirror_source_repository=file_config.get("mirror_source_repository"),
+        mirror_source_commit=file_config.get("mirror_source_commit"),
     )
     config.validate()
     return config
 
 
 class BatchRunner:
-    def __init__(self, config: BatchConfig, batch_id: str, *, resume: bool = False) -> None:
+    def __init__(
+        self,
+        config: BatchConfig,
+        batch_id: str,
+        *,
+        resume: bool = False,
+        prepare_mirror: bool = True,
+    ) -> None:
         self.config = config
         self.batch_id = batch_id
         self.batch_dir = Path(config.batch_root) / batch_id
@@ -305,6 +319,16 @@ class BatchRunner:
         self.created_at = now()
         self.base_env = os.environ.copy()
         self.base_env.update(parse_env_file(Path(config.env_file) if config.env_file else None))
+        if not resume and prepare_mirror and config.mirror_root:
+            mirror = prepare_batch_mirror(
+                config.repository_root,
+                config.mirror_root,
+                batch_id,
+                config.integration_branch,
+            )
+            config.mirror_source_repository = mirror.source_repository
+            config.mirror_source_commit = mirror.source_commit
+            config.repository_root = mirror.path
         self.manager = WorktreeManager(config.repository_root, config.workspace_root)
         if resume:
             self._load_state()
@@ -1108,6 +1132,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--run-timeout-seconds", type=float)
     result.add_argument("--kimi-bin")
     result.add_argument("--kimi-home")
+    result.add_argument("--mirror-root")
     result.add_argument("--env-file")
     result.add_argument("--merge-accepted", action="store_true", default=None)
     result.add_argument("--cleanup-worktrees", action="store_true", default=None)
@@ -1123,12 +1148,12 @@ def main() -> int:
     else:
         config = build_config(args)
         batch_id = f"scicode-batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
-        runner = BatchRunner(config, batch_id)
+        runner = BatchRunner(config, batch_id, prepare_mirror=not args.dry_run)
     if args.dry_run:
         return runner.dry_run()
     try:
         return runner.run()
-    except (OSError, ValueError, WorktreeError, CandidateValidationError, PipelineError) as exc:
+    except (OSError, ValueError, MirrorError, WorktreeError, CandidateValidationError, PipelineError) as exc:
         print(json.dumps({"schema": SCHEMA, "status": "error", "error": str(exc)}, ensure_ascii=False))
         runner._persist()
         return 2
