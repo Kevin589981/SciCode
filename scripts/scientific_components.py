@@ -51,7 +51,7 @@ class Provenance:
     source_kind: str
     source_title: str
     source_url: str
-    license: str = "Reference only; no source code copied"
+    license: str = "not-applicable: no source code copied"
 
 
 @dataclass(frozen=True)
@@ -306,9 +306,11 @@ def _context(
     scenario = SCENARIO_MAP[_choose(rng, recipe.scenario_keys)]
     diagnostic = DIAGNOSTIC_MAP[_choose(rng, recipe.diagnostic_keys)]
     mode = recipe.modes[rng.randrange(len(recipe.modes))]
-    variant_key, variant_description = DESIGN_VARIANTS[
-        (index + seed * 5) % len(DESIGN_VARIANTS)
-    ]
+    variant_token = hashlib.sha256(
+        f"{seed}:{index}:design-variant".encode("utf-8")
+    ).digest()
+    variant_index = int.from_bytes(variant_token[:8], "big") % len(DESIGN_VARIANTS)
+    variant_key, variant_description = DESIGN_VARIANTS[variant_index]
     params = dict(recipe.parameter_factory(rng))
     suffix = problem_id.replace("-", "_")
     context: dict[str, object] = {
@@ -708,7 +710,7 @@ RECIPES: tuple[ProblemRecipe, ...] = (
             ), "return susceptibility, peak_frequency, absorbed_area, diagnostic", "Integrated absorption and resonance location provide independent checks on a response implementation."),
         ),
         (_mode("analytic", "analytic frequency response", "Evaluate the closed-form complex response directly.", "The closed form avoids time-window leakage but requires a consistent Fourier sign convention."), _mode("ode", "time-domain integration", "Integrate the driven oscillator and estimate the response from the steady-state segment.", "Time-domain estimates require discarding transients and documenting the sampling interval.")),
-        ("bounded", "noisy", "irregular", "multichannel"), ("spectrum", "uncertainty", "robustness"),
+        ("bounded", "noisy", "irregular", "calibrated"), ("spectrum", "uncertainty", "robustness"),
         "SciPy signal-processing reference routines", "https://github.com/scipy/scipy", ("response", "spectroscopy", "complex-valued"),
     ),
     _recipe(
@@ -737,7 +739,7 @@ RECIPES: tuple[ProblemRecipe, ...] = (
             ), "return mean_energy, mean_magnetization, susceptibility, diagnostic", "Fluctuation observables depend on the sampling convention and normalization; report the convention through the function contract."),
         ),
         (_mode("metropolis", "Metropolis-Hastings", "Use the standard single-spin Metropolis acceptance probability.", "Metropolis sampling is simple but autocorrelated near the critical region."), _mode("heatbath", "heat-bath flips", "Use the conditional heat-bath probability for a proposed spin.", "Heat-bath updates sample the local conditional distribution directly.")),
-        ("periodic", "stochastic", "ensemble", "positive"), ("invariant", "uncertainty", "robustness"),
+        ("periodic", "stochastic", "ensemble", "bounded"), ("invariant", "uncertainty", "robustness"),
         "Open-source statistical-physics reference implementation family", "https://github.com/hoomd-blue/hoomd-blue", ("monte-carlo", "lattice-model", "sampling"),
     ),
     _recipe(
@@ -766,7 +768,7 @@ RECIPES: tuple[ProblemRecipe, ...] = (
             ), "return positions_final, velocities_final, total_energy, diagnostic", "Energy and angular momentum are independent global checks on pairwise force signs and time integration."),
         ),
         (_mode("verlet", "velocity Verlet", "Use a velocity-Verlet kick-drift-kick update.", "Velocity Verlet is time reversible for a fixed force law."), _mode("yoshida", "fourth-order composition", "Compose symmetric second-order steps with the stated fourth-order coefficients.", "A symmetric composition can reduce phase error but requires careful coefficient ordering.")),
-        ("bounded", "stochastic", "anisotropic", "positive"), ("invariant", "stability", "sensitivity"),
+        ("bounded", "stochastic", "anisotropic", "periodic"), ("invariant", "stability", "sensitivity"),
         "OpenMM molecular simulation reference algorithms", "https://github.com/openmm/openmm", ("n-body", "symplectic", "force-law"),
     ),
     _recipe(
@@ -912,7 +914,7 @@ RECIPES: tuple[ProblemRecipe, ...] = (
             ), "return peak_positions, integrated_area, diagnostic", "Peak extraction must define ties, edge bins, and whether area uses the trapezoidal grid spacing."),
         ),
         (_mode("kinematic", "kinematic Bragg mapping", "Use the analytic d-spacing and Bragg-angle mapping supplied in the contract.", "Kinematic diffraction ignores multiple scattering but preserves the coherent basis sum."), _mode("reciprocal", "reciprocal-vector mapping", "Compute reciprocal vectors first and derive d-spacing from their norm.", "The reciprocal-vector convention fixes the factor of 2*pi and the lattice metric.")),
-        ("bounded", "anisotropic", "multichannel", "calibrated"), ("spectrum", "robustness", "calibration"),
+        ("bounded", "anisotropic", "calibrated", "irregular"), ("spectrum", "robustness", "calibration"),
         "pymatgen crystal-structure reference project", "https://github.com/materialsproject/pymatgen", ("materials", "diffraction", "complex-sum"),
     ),
     _recipe(
@@ -1173,7 +1175,7 @@ RECIPES: tuple[ProblemRecipe, ...] = (
             ), "return power, best_period, folded_scatter, diagnostic", "A period peak is not sufficient evidence; folded scatter and a false-alarm or coherence statistic expose aliasing."),
         ),
         (_mode("classic", "classic Lomb-Scargle", "Use the centered classic Lomb-Scargle normalization.", "Classic normalization depends on the variance of the centered observations."), _mode("floating_mean", "floating-mean periodogram", "Fit a floating mean at each trial frequency.", "A floating mean handles uneven phase coverage but changes the null distribution.")),
-        ("irregular", "noisy", "bounded", "multichannel"), ("spectrum", "uncertainty", "robustness"),
+        ("irregular", "noisy", "bounded", "calibrated"), ("spectrum", "uncertainty", "robustness"),
         "Astropy Lomb-Scargle reference implementation", "https://github.com/astropy/astropy", ("astronomy", "period-search", "irregular-time"),
     ),
     _recipe(
