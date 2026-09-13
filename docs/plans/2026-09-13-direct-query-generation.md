@@ -59,6 +59,16 @@ Run the focused test suite, generate a small deterministic batch, validate every
 
 ### Task 6: Start the 10k batch
 
-Status: in progress.
+Status: complete.
 
 Commit and push this branch, clone it into a fresh yicloud checkout with an independent `.git`, run the local synthesizer for 10,000 queries in a detached process, and record the output manifest and monitoring command. Keep the existing Kimi Code batch separate and untouched; Kimi is used only in the later answer synthesis stage.
+
+Verification completed on yicloud:
+
+- checkout: `/root/scicode-query-synthesis-v2` (`.git` and git common dir are local to the checkout);
+- output: `/root/scicode-query-output/query-10k-20260913`;
+- manifest: `status=finished`, `accepted_queries=10000`,
+  `subproblem_count=30000`, `rejected_queries=0`;
+- full validation: 10,000 valid records, 10,000 unique IDs, 10,000 unique
+  record hashes, and no answer/oracle/trace files;
+- model accounting: `model_calls=0`, `kimi_api_calls=0`.
