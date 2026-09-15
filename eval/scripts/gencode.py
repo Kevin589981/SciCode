@@ -2,8 +2,9 @@ import argparse
 import sys
 from pathlib import Path
 
-# Keep the documented direct entry point runnable from a source checkout.
-SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
+# Keep the documented direct entry point runnable from any working directory.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+SOURCE_ROOT = REPOSITORY_ROOT / "src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
@@ -13,8 +14,8 @@ from scicode.parse.parse import (
     read_from_hf_dataset,
 )
 
-DEFAULT_PROMPT_TEMPLATE = Path("eval", "data", "background_comment_template.txt").read_text()
-BACKGOUND_PROMPT_TEMPLATE = Path("eval", "data", "multistep_template.txt").read_text()
+DEFAULT_PROMPT_TEMPLATE = (REPOSITORY_ROOT / "eval" / "data" / "background_comment_template.txt").read_text()
+BACKGOUND_PROMPT_TEMPLATE = (REPOSITORY_ROOT / "eval" / "data" / "multistep_template.txt").read_text()
 
 
 class Gencode:
@@ -79,7 +80,7 @@ class Gencode:
                 if self.previous_llm_code[prev_step] is None:
                     if (prob_id == "13" and prev_step == 5) or (prob_id == "62" and prev_step == 0)\
                             or (prob_id == "76" and prev_step == 2):
-                        prev_file_path = Path("eval", "data", f"{prob_id}.{prev_step+1}.txt")
+                        prev_file_path = REPOSITORY_ROOT / "eval" / "data" / f"{prob_id}.{prev_step+1}.txt"
                     else:
                         prev_file_path = (
                                 self.output_dir / Path(self.model).parts[-1] / self._get_background_dir()
