@@ -516,7 +516,7 @@ def test_bind_run_artifacts_rejects_non_strict_or_unfinished_run(tmp_path):
 def test_release_handoff_does_not_fallback_without_run_id(tmp_path):
     worktree = tmp_path / "worktree"
     candidate_dir = worktree / "authoring" / "auto-000001"
-    handoff = _write_complete_run(candidate_dir)
+    _write_complete_run(candidate_dir)
     decision = candidate_dir / "validation" / "release_decision.json"
     decision.parent.mkdir(parents=True)
     decision.write_text(json.dumps({"decision": "accepted"}), encoding="utf-8")
@@ -529,7 +529,7 @@ def test_release_waits_for_complete_trace_after_manifest_appears(tmp_path):
     worktree = tmp_path / "worktree"
     candidate_dir = worktree / "authoring" / "auto-000001"
     _write_candidate_manifest(candidate_dir / "candidate_manifest.json")
-    handoff = _write_complete_run(candidate_dir)
+    _write_complete_run(candidate_dir)
     decision = candidate_dir / "validation" / "release_decision.json"
     decision.parent.mkdir(parents=True, exist_ok=True)
     decision.write_text(

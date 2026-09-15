@@ -18,6 +18,7 @@ import sys
 import time
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +98,43 @@ def merge_local_delivery(local_root: Path, shared_root: Path, target: int) -> in
         return len(existing)
 
 
-def worker_loop(worker_id: int, config: dict[str, Any], stop: mp.Event) -> None:
+def _write_parent_state(
+    root: Path,
+    config: dict[str, Any],
+    batch_id: str,
+    workers: list[mp.Process],
+    status: str,
+    *,
+    error: str | None = None,
+) -> None:
+    """Publish a monitorable parent snapshot without exposing model secrets."""
+    snapshot = {
+        "schema": "scicode-multiprocess-batch-v1",
+        "batch_id": batch_id,
+        "status": status,
+        "target_samples": int(config["target_samples"]),
+        "accepted_samples": _count_rows(Path(config["delivery_root"]) / "dataset.jsonl"),
+        "workers": [
+            {
+                "worker_id": index,
+                "pid": worker.pid,
+                "alive": worker.is_alive(),
+                "exitcode": worker.exitcode,
+            }
+            for index, worker in enumerate(workers)
+        ],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if error:
+        snapshot["error"] = error
+    root.mkdir(parents=True, exist_ok=True)
+    state = root / "state.json"
+    temporary = state.with_suffix(".tmp")
+    temporary.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, state)
+
+
+def worker_loop(worker_id: int, config: dict[str, Any], stop: Any) -> None:
     root = Path(config["batch_root"]) / f"worker-{worker_id:04d}"
     root.mkdir(parents=True, exist_ok=True)
     loop = 0
@@ -154,12 +191,24 @@ def main() -> int:
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    workers_count = int(config["workers"])
+    target_samples = int(config["target_samples"])
+    mirror_shards = int(config.get("mirror_shards", min(workers_count, 32)))
+    if workers_count < 1:
+        raise SystemExit("workers must be positive")
+    if target_samples < 1:
+        raise SystemExit("target_samples must be positive")
+    if mirror_shards < 1:
+        raise SystemExit("mirror_shards must be positive")
     batch_id = config.get("batch_id", f"mp-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}")
     root = Path(config["batch_root"]).resolve()
     mirror_root = Path(config["mirror_root"]).resolve()
     source = Path(config["repository_root"]).resolve()
-    shard_count = int(config.get("mirror_shards", min(int(config["workers"]), 32)))
+    shard_count = mirror_shards
     mirrors = []
+    root.mkdir(parents=True, exist_ok=True)
+    mirror_root.mkdir(parents=True, exist_ok=True)
+    (Path(config["delivery_root"]).resolve()).mkdir(parents=True, exist_ok=True)
     for index in range(shard_count):
         path = mirror_root / f"{batch_id}-shard-{index:03d}"
         if not path.exists():
@@ -167,23 +216,45 @@ def main() -> int:
         else:
             mirrors.append(str(path))
     config.update({"batch_id": batch_id, "batch_root": str(root), "mirrors": mirrors, "controller_script": str(REPOSITORY_ROOT / "scripts" / "run_10k_batch.py"), "python": sys.executable})
-    root.mkdir(parents=True, exist_ok=True)
     (root / "resolved-config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    stop = mp.Event()
-    workers = [mp.Process(target=worker_loop, args=(i, config, stop), name=f"scicode-worker-{i:04d}") for i in range(int(config["workers"]))]
-    for worker in workers: worker.start()
+    # Spawn gives every worker a clean interpreter and prevents inherited locks,
+    # sockets, and partially initialized provider clients from crossing workers.
+    context = mp.get_context("spawn")
+    stop = context.Event()
+    workers = [context.Process(target=worker_loop, args=(i, config, stop), name=f"scicode-worker-{i:04d}") for i in range(workers_count)]
+    for worker in workers:
+        worker.start()
+    _write_parent_state(root, config, batch_id, workers, "running")
+    restart_limit = int(config.get("worker_restart_limit", 2))
+    restart_counts = [0] * workers_count
     try:
         while not stop.is_set():
             count = _count_rows(Path(config["delivery_root"]) / "dataset.jsonl")
-            if count >= int(config["target_samples"]): break
+            if count >= target_samples:
+                break
+            for index, worker in enumerate(workers):
+                if worker.is_alive():
+                    continue
+                if restart_counts[index] >= restart_limit:
+                    continue
+                restart_counts[index] += 1
+                replacement = context.Process(target=worker_loop, args=(index, config, stop), name=f"scicode-worker-{index:04d}-r{restart_counts[index]}")
+                replacement.start()
+                workers[index] = replacement
+            _write_parent_state(root, config, batch_id, workers, "running")
             time.sleep(float(config.get("monitor_seconds", 10)))
     except KeyboardInterrupt:
-        pass
+        _write_parent_state(root, config, batch_id, workers, "stopping")
     finally:
         stop.set()
-        for worker in workers: worker.join(timeout=10)
         for worker in workers:
-            if worker.is_alive(): worker.terminate()
+            worker.join(timeout=10)
+        for worker in workers:
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(timeout=5)
+        final_count = _count_rows(Path(config["delivery_root"]) / "dataset.jsonl")
+        _write_parent_state(root, config, batch_id, workers, "finished" if final_count >= target_samples else "stopped")
     return 0
 
 

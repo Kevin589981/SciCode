@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from .candidate import CandidateValidationError, load_candidate, sha256_file
+from .candidate import load_candidate, sha256_file
 from .checks import run_candidate_checks
 from .samples import SampleExportError, export_subproblem_samples
 from .trace_checks import audit_rollouts

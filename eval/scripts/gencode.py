@@ -1,5 +1,11 @@
 import argparse
+import sys
 from pathlib import Path
+
+# Keep the documented direct entry point runnable from a source checkout.
+SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
 from scicode.parse.parse import (
     extract_function_name,

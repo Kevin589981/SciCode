@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from .candidate import (
-    CandidateManifest,
-    CandidateValidationError,
     load_candidate,
     read_jsonl,
     validate_oracle_layout,

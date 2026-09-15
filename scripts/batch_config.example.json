@@ -18,5 +18,6 @@
   "env_file": "/root/scicode-authoring/.env-nex",
   "merge_accepted": false,
   "cleanup_worktrees": false,
-  "drain": true
+  "drain": true,
+  "avacore_max_slots": 8
 }
