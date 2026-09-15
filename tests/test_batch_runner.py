@@ -199,6 +199,7 @@ class RunningProcess:
 
 
 def _runner_for_authoring_retry(tmp_path, job):
+    Path(job.worktree_path).mkdir(parents=True, exist_ok=True)
     runner = object.__new__(BatchRunner)
     runner.processes = {job.candidate_id: FinishedProcess(code=1)}
     runner.log_streams = {}

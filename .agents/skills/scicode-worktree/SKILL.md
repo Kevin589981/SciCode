@@ -39,9 +39,10 @@ Use this skill before creating or editing a candidate.
 
 ## Cleanup
 
-Run `"$SCICODE_PYTHON" scripts/worktree.py cleanup-copy ...` only after a successful merge
-or a recorded rejection. Do not delete the branch or Git history. Preserve the
-candidate manifest and rejection record.
+Do not run `scripts/worktree.py cleanup-copy` from the Kimi Code session. The
+batch coordinator owns cleanup after it has observed the final decision,
+persisted the delivery/merge record, and released the candidate. Keep the
+worktree and lock intact while the coordinator is tracking the candidate.
 
 ## Failure handling
 

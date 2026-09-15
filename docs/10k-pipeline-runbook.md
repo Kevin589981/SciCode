@@ -60,6 +60,19 @@ per batch from the clean integration branch and uses only that mirror for
 candidate worktrees. The source checkout must be clean; the selected source
 commit and mirror path are recorded in `state.json` and reused on resume.
 
+For production-scale startup, use the multiprocess coordinator instead of a
+single serial controller:
+
+```bash
+"$SCICODE_PYTHON" scripts/run_10k_batch_mp.py \
+  --config /root/scicode-authoring/mp-batch-config.json
+```
+
+Set `workers` to the desired Kimi Code launch parallelism, `mirror_shards` to
+the number of independent Git mirrors, and `avacore_max_slots` to a value the
+PostgreSQL/AvaCore deployment can support. The coordinator merges worker-local
+delivery rows with a file lock and keeps each worker's state independent.
+
 ## Start Kimi Code authoring
 
 Run Kimi Code from the repository checkout. Give it one candidate id and tell

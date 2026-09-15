@@ -189,6 +189,7 @@ class BatchConfig:
     mirror_root: str | None = None
     mirror_source_repository: str | None = None
     mirror_source_commit: str | None = None
+    avacore_max_slots: int = 8
 
     def validate(self) -> None:
         if not ID_PATTERN.fullmatch(self.candidate_prefix):
@@ -201,6 +202,8 @@ class BatchConfig:
             raise ValueError("target_samples must be positive")
         if self.max_candidates is not None and self.max_candidates < 1:
             raise ValueError("max_candidates must be positive")
+        if self.avacore_max_slots < 1:
+            raise ValueError("avacore_max_slots must be positive")
         if self.poll_seconds <= 0 or self.max_rounds < 1:
             raise ValueError("poll_seconds and max_rounds must be positive")
 
@@ -306,6 +309,7 @@ def build_config(args: argparse.Namespace) -> BatchConfig:
         mirror_root=_pick(args, file_config, "mirror_root", None),
         mirror_source_repository=file_config.get("mirror_source_repository"),
         mirror_source_commit=file_config.get("mirror_source_commit"),
+        avacore_max_slots=int(_pick(args, file_config, "avacore_max_slots", 8)),
     )
     config.validate()
     return config
@@ -330,6 +334,7 @@ class BatchRunner:
         self.log_streams: dict[str, Any] = {}
         self.next_index = config.start_index
         self.stop_requested = False
+        self.last_scheduler_error: str | None = None
         self.created_at = now()
         self.base_env = os.environ.copy()
         self.base_env.update(parse_env_file(Path(config.env_file) if config.env_file else None))
@@ -362,6 +367,7 @@ class BatchRunner:
         state = read_json(self.state_path)
         self.created_at = str(state.get("created_at", self.created_at))
         self.next_index = int(state.get("next_index", self.config.start_index))
+        self.last_scheduler_error = state.get("last_scheduler_error")
         self.jobs = {
             item["candidate_id"]: Job.from_dict(item)
             for item in state.get("jobs", [])
@@ -379,6 +385,7 @@ class BatchRunner:
             "config": self.config.as_dict(),
             "next_index": self.next_index,
             "accepted_samples": accepted,
+            "last_scheduler_error": self.last_scheduler_error,
             "jobs": [job.as_dict() for job in self.jobs.values()],
         }
         self.batch_dir.mkdir(parents=True, exist_ok=True)
@@ -422,7 +429,7 @@ class BatchRunner:
                     candidate_id,
                     base_ref=self.config.integration_branch,
                 )
-            except WorktreeError:
+            except (OSError, WorktreeError):
                 continue
             job_root = self.jobs_dir / candidate_id
             job_root.mkdir(parents=True, exist_ok=True)
@@ -491,6 +498,9 @@ class BatchRunner:
         # Skills use one explicit interpreter; inherit the controller's tested
         # environment unless the operator supplied a different one.
         env.setdefault("SCICODE_PYTHON", sys.executable)
+        env.setdefault("SCICODE_AVACORE_SLOTS_ROOT", str(Path(self.config.workspace_root) / ".avacore-slots"))
+        env.setdefault("SCICODE_AVACORE_MAX_SLOTS", str(self.config.avacore_max_slots))
+        env.setdefault("CONCURRENCY", "1")
         # Keep solver credentials and routing in the child environment without
         # allowing Kimi Code's dynamic KIMI_MODEL_* variables to override its
         # isolated config.toml. KIMI_MODEL is accepted only as a solver-model
@@ -991,6 +1001,9 @@ candidate artifacts before declaring the candidate complete. Do not push.
     def _advance(self, job: Job) -> None:
         if not job.active:
             return
+        if not Path(job.worktree_path).is_dir():
+            self._fail(job, "candidate worktree is missing; coordinator will not resume it")
+            return
         process_finished = self._finish_process(job)
         handoff = self._latest_handoff(job)
         handoff_is_new = handoff is not None and str(handoff) != job.handoff_path
@@ -1121,9 +1134,17 @@ candidate artifacts before declaring the candidate complete. Do not push.
         signal.signal(signal.SIGINT, stop_handler)
         signal.signal(signal.SIGTERM, stop_handler)
         while not self.stop_requested:
-            self._fill_slots()
+            try:
+                self._fill_slots()
+            except (OSError, WorktreeError, ValueError) as exc:
+                self.last_scheduler_error = str(exc)
+                self._persist()
+                time.sleep(min(self.config.poll_seconds, 5.0))
             for job in list(self.jobs.values()):
-                self._advance(job)
+                try:
+                    self._advance(job)
+                except (OSError, WorktreeError, ValueError, CandidateValidationError, PipelineError) as exc:
+                    self._fail(job, f"coordinator recovered candidate exception: {exc}")
             self._persist()
             accepted = dataset_count(Path(self.config.delivery_root) / "dataset.jsonl")
             active = self._active_jobs()
@@ -1185,6 +1206,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--kimi-bin")
     result.add_argument("--kimi-home")
     result.add_argument("--mirror-root")
+    result.add_argument("--avacore-max-slots", type=int)
     result.add_argument("--env-file")
     result.add_argument("--merge-accepted", action="store_true", default=None)
     result.add_argument("--cleanup-worktrees", action="store_true", default=None)

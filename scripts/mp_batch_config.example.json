@@ -1,0 +1,19 @@
+{
+  "repository_root": "/root/scicode-authoring/repository-clean",
+  "mirror_root": "/var/lib/scicode-git-mirrors/mp-batches",
+  "workspace_root": "/root/scicode-authoring-clean/mp-1k",
+  "batch_root": "/root/scicode-authoring-clean/mp-1k/workers",
+  "delivery_root": "/root/scicode-authoring-clean/mp-1k/delivery",
+  "integration_branch": "codex/per-batch-git-mirror",
+  "workers": 32,
+  "mirror_shards": 16,
+  "target_samples": 1000,
+  "poll_seconds": 10,
+  "max_rounds": 6,
+  "run_timeout_seconds": 7200,
+  "kimi_bin": "/root/scicode-authoring/kimi-1800-exact",
+  "kimi_home": "/root/scicode-authoring/kimi-code-fixed",
+  "env_file": null,
+  "avacore_max_slots": 8,
+  "monitor_seconds": 10
+}

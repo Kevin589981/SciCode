@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .candidate import CandidateManifest, load_candidate
+from .candidate import load_candidate
 from .run_manifest import safe_endpoint
 
 
@@ -135,6 +135,26 @@ def submit_avacore(
         if not inherited_pythonpath
         else os.pathsep.join((source_path, inherited_pythonpath))
     )
+    slot_root = child_env.get("SCICODE_AVACORE_SLOTS_ROOT")
+    slot_limit = child_env.get("SCICODE_AVACORE_MAX_SLOTS")
+    if slot_root and slot_limit:
+        try:
+            parsed_limit = int(slot_limit)
+        except ValueError as exc:
+            raise HandoffError("SCICODE_AVACORE_MAX_SLOTS must be an integer") from exc
+        if parsed_limit < 1:
+            raise HandoffError("SCICODE_AVACORE_MAX_SLOTS must be positive")
+        slot_runner = repository_root / "scripts" / "run_avacore_slot.py"
+        command = [
+            str(avacore_python),
+            str(slot_runner),
+            "--slots-root",
+            slot_root,
+            "--max-slots",
+            str(parsed_limit),
+            "--",
+            *command,
+        ]
     # The caller supplies POSTGRES/OPENAI_API_KEY through the inherited
     # environment; neither value is copied into the handoff manifest.
     with log_path.open("ab") as log:

@@ -245,6 +245,11 @@ scientifically acceptable.
    dataset or bypass the delivery skill.
 5. Stage and commit the complete candidate revision on its allocated branch
    before requesting delivery. Do not push the branch.
+6. Do not invoke `scripts/worktree.py cleanup-copy` or remove the allocated
+   worktree from an authoring session. The batch coordinator owns worktree
+   cleanup after it has persisted the final decision, merge result, and audit
+   record. Leave the worktree and lock intact while the coordinator is tracking
+   the candidate.
 
 ## 11. Final prohibitions
 

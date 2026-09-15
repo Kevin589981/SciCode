@@ -6,6 +6,11 @@ authoring instructions: the authoring session receives only its allocated
 candidate worktree and follows `AGENTS.md`. Batch size, concurrency, process
 launch details, retries, and delivery locking stay here.
 
+For high-throughput production use, prefer `scripts/run_10k_batch_mp.py`.
+It starts independent OS worker processes, each with its own one-candidate
+controller state and local delivery directory. The parent merges completed rows
+under a shared file lock, so one worker crash cannot stop the other workers.
+
 ## What it does
 
 For each slot, the controller:
@@ -91,6 +96,23 @@ Important settings:
 | `cleanup_worktrees` | Remove only successfully merged worktree copies. |
 | `drain` | Let active candidates finish after the target is reached. |
 | `mirror_root` | Parent directory for one independent Git mirror per batch. |
+| `avacore_max_slots` | Global maximum number of detached AvaCore runs allowed at once. |
+
+## Multiprocess Start
+
+Copy `scripts/mp_batch_config.example.json`, choose `workers` and
+`mirror_shards`, then run:
+
+```bash
+"$SCICODE_PYTHON" scripts/run_10k_batch_mp.py \
+  --config /root/scicode-authoring/mp-batch-config.json
+```
+
+Workers never run `cleanup-copy`; the coordinator owns worktree cleanup after
+the final delivery decision. `mirror_shards` limits how many independent Git
+mirrors are created while workers remain isolated by their own workspace and
+state directory. `avacore_max_slots` prevents hundreds of detached runs from
+exhausting the PostgreSQL connection pool.
 
 ## Start
 
