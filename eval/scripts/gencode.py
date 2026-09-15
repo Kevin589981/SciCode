@@ -12,7 +12,6 @@ from scicode.parse.parse import (
     get_function_from_code,
     read_from_hf_dataset,
 )
-from scicode.gen.models import extract_python_script, get_model_function
 
 DEFAULT_PROMPT_TEMPLATE = Path("eval", "data", "background_comment_template.txt").read_text()
 BACKGOUND_PROMPT_TEMPLATE = Path("eval", "data", "multistep_template.txt").read_text()
@@ -41,6 +40,8 @@ class Gencode:
 
     def save_response_with_steps(self, prob_data: dict, response: str,
                                  previous_code: str, num_steps: int) -> None:
+        from scicode.gen.models import extract_python_script
+
         output_dir = (
                 self.output_dir / Path(self.model).parts[-1] / self._get_background_dir()
         )
@@ -111,6 +112,8 @@ class Gencode:
         ):
             model_kwargs["trace_callback"] = self._record_provider_event
         # write the response to a file if it doesn't exist
+        from scicode.gen.models import extract_python_script, get_model_function
+
         model_fct = get_model_function(model, **model_kwargs)
         response_from_llm = model_fct(prompt)
         self.previous_llm_code[num_steps - 1] = extract_python_script(response_from_llm)
