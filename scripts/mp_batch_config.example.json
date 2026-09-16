@@ -15,5 +15,6 @@
   "kimi_home": "/root/scicode-authoring/kimi-code-fixed",
   "env_file": null,
   "avacore_max_slots": 8,
-  "monitor_seconds": 10
+  "monitor_seconds": 10,
+  "trace_first": true
 }

@@ -142,6 +142,7 @@ def validate_rows(rows: Iterable[Mapping[str, Any]], source: str | Path) -> list
     source = Path(source)
     normalized = [dict(row) for row in rows]
     problem_ids: set[str] = set()
+    global_step_ids: set[str] = set()
     for row_number, row in enumerate(normalized, start=1):
         missing = TOP_LEVEL_FIELDS - row.keys()
         if missing:
@@ -194,7 +195,10 @@ def validate_rows(rows: Iterable[Mapping[str, Any]], source: str | Path) -> list
             step_id = str(step["step_number"])
             if not step_id or step_id in step_ids:
                 raise CandidateValidationError(f"duplicate step_number in {problem_id}: {step_id!r}")
+            if step_id in global_step_ids:
+                raise CandidateValidationError(f"step_number is not globally unique: {step_id!r}")
             step_ids.add(step_id)
+            global_step_ids.add(step_id)
             for field in (
                 "step_description_prompt",
                 "function_header",
@@ -253,15 +257,16 @@ class CandidateManifest:
     paper_url: str = ""
     paper_doi: str = ""
     source_fingerprint: str = ""
+    candidate_profile: str = "legacy_strict"
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def _load_metadata(root: Path) -> tuple[str, str, str]:
+def _load_metadata(root: Path) -> tuple[str, str, str, str]:
     path = root / "candidate.json"
     if not path.is_file():
-        return root.name, "r1", "background"
+        return root.name, "r1", "background", "legacy_strict"
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -279,7 +284,10 @@ def _load_metadata(root: Path) -> tuple[str, str, str]:
         raise CandidateValidationError(f"invalid prompt_profile: {prompt_profile!r}")
     if str(value.get("mode", "strict")) != "strict":
         raise CandidateValidationError("candidate mode must be strict")
-    return candidate_id, revision, prompt_profile
+    candidate_profile = str(value.get("candidate_profile", "legacy_strict"))
+    if candidate_profile not in {"legacy_strict", "function_pair", "function_batch"}:
+        raise CandidateValidationError(f"invalid candidate_profile: {candidate_profile!r}")
+    return candidate_id, revision, prompt_profile, candidate_profile
 
 
 def _validate_provenance(path: Path) -> tuple[str, dict[str, Any]]:
@@ -398,7 +406,7 @@ def load_candidate(root: str | Path, *, prompt_profile: str | None = None) -> Ca
     validate_oracle_layout(oracle_file, rows)
     payload_sha = _validate_solver_payload(payload)
     requested_profile = prompt_profile
-    candidate_id, revision, metadata_profile = _load_metadata(root)
+    candidate_id, revision, metadata_profile, candidate_profile = _load_metadata(root)
     if requested_profile is not None and requested_profile != metadata_profile:
         raise CandidateValidationError(
             f"prompt profile mismatch: candidate={metadata_profile!r}, requested={requested_profile!r}"
@@ -406,6 +414,11 @@ def load_candidate(root: str | Path, *, prompt_profile: str | None = None) -> Ca
     prompt_profile = requested_profile or metadata_profile
     if prompt_profile not in {"background", "without_background"}:
         raise CandidateValidationError(f"invalid prompt_profile: {prompt_profile!r}")
+    if candidate_profile in {"function_pair", "function_batch"}:
+        if any(len(row["sub_steps"]) != 1 for row in rows):
+            raise CandidateValidationError(
+                "function_pair/function_batch candidates must use one subproblem per problem"
+            )
     visible = visible_projection(rows)
     subproblem_count = sum(
         sum(
@@ -437,6 +450,7 @@ def load_candidate(root: str | Path, *, prompt_profile: str | None = None) -> Ca
         paper_url=str(provenance.get("paper_url") or ""),
         paper_doi=str(provenance.get("paper_doi") or ""),
         source_fingerprint=str(provenance["source_fingerprint"]),
+        candidate_profile=candidate_profile,
     )
 
 

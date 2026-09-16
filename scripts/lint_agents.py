@@ -10,12 +10,11 @@ from pathlib import Path
 
 
 REQUIRED_SECTIONS = (
-    "## 1. Keep the roles separate",
-    "## 2. Start a candidate session",
-    "## 4. Preserve the original SciCode contract",
-    "## 7. Hand the candidate to AvaCore",
-    "## 8. Treat reasoning and usage as trace data",
-    "## 10. Accept or hand off the candidate",
+    "## 1. Create independent function questions",
+    "## 2. Preserve the solver contract",
+    "## 3. Run lightweight deterministic checks",
+    "## 4. Submit one strict trace run",
+    "## 5. Deliver trace samples",
 )
 MODAL = re.compile(r"\b(?:should|could|might|would|may|can|will)\b", re.IGNORECASE)
 

@@ -154,3 +154,21 @@ Classify provider/network/queue/database errors as infrastructure. Classify a
 `finish_reason` of `length` at 262,144 tokens as a normal trace status. Retry
 transient or incomplete runs up to three times, then let Kimi Code decide task
 revision or rejection using the recorded evidence.
+
+## Function-pair trace mode
+
+Use `scripts/mp_batch_config.scicodepile-lite.example.json` for high-volume
+trace collection and set `trace_first` to `true`. One authoring session can
+turn several scientific functions from one research source into independent
+one-subproblem SciCode problems. The session performs only cheap candidate
+checks and submits the AvaCore handoff.
+
+After AvaCore finishes a complete strict run, the coordinator exports the
+subproblem traces directly. It does not launch a review child or resume Kimi
+Code. A complete incorrect solver answer remains a trace; malformed or
+incomplete traces remain outside `dataset.jsonl`.
+
+The remote Codex CLI provider is configured separately in `~/.codex/config.toml`
+under `company-kimi`. Keep the existing default provider intact and invoke the
+Kimi model explicitly with `codex exec -m Kimi-K3`. Store the gateway key in the
+environment variable named by `env_key`; never commit it.

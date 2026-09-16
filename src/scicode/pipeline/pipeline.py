@@ -137,6 +137,7 @@ def run_candidate_pipeline(
     require_review: bool = True,
     allow_unreviewed: bool = False,
     allow_qa_export: bool = False,
+    trace_first: bool = False,
 ) -> dict[str, Any]:
     """Advance a candidate through validated/reviewed/run/delivery states.
 
@@ -152,6 +153,8 @@ def run_candidate_pipeline(
     state = "validated"
     review_path = root / "validation" / "review_child.json"
     warnings: list[str] = []
+    if trace_first:
+        allow_unreviewed = True
     if _review_passed(review_path):
         state = "reviewed"
     elif require_review and not allow_unreviewed:
@@ -184,7 +187,7 @@ def run_candidate_pipeline(
             manifest,
             rollouts_path,
             require_usage=not allow_qa_export,
-            require_reasoning=not allow_qa_export,
+            require_reasoning=not allow_qa_export and not trace_first,
         )
         result["trace_audit"] = trace_audit
         _write_json(root / "validation" / "trace_report.json", trace_audit)
@@ -198,8 +201,8 @@ def run_candidate_pipeline(
                 warnings.append("AvaCore run is not promotable; samples remain QA-only")
                 run_is_promotable = False
         release = root / "validation" / "release_decision.json"
-        release_passed = _review_passed(release)
-        if release_passed and run_value is not None:
+        release_passed = trace_first or _review_passed(release)
+        if release_passed and run_value is not None and not trace_first:
             release_value = _read_json(release)
             if release_value.get("run_id") != run_value.get("run_id"):
                 message = "release decision run_id does not match the run manifest"
@@ -242,6 +245,8 @@ def run_candidate_pipeline(
         if release_passed and run_is_promotable and export_result["new_samples"] >= 0:
             state = "accepted"
             result["state"] = state
+            if trace_first:
+                result["delivery_mode"] = "trace_first"
     state_path = root / "validation" / "pipeline_manifest.json"
     _write_json(state_path, result)
     result["pipeline_manifest"] = str(state_path)

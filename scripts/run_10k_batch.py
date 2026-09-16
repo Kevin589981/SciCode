@@ -190,6 +190,7 @@ class BatchConfig:
     mirror_source_repository: str | None = None
     mirror_source_commit: str | None = None
     avacore_max_slots: int = 8
+    trace_first: bool = False
 
     def validate(self) -> None:
         if not ID_PATTERN.fullmatch(self.candidate_prefix):
@@ -267,7 +268,7 @@ def _load_config_file(path: Path | None) -> dict[str, Any]:
 
 
 def _pick(args: argparse.Namespace, config: Mapping[str, Any], name: str, default: Any) -> Any:
-    value = getattr(args, name)
+    value = getattr(args, name, None)
     return value if value is not None else config.get(name, default)
 
 
@@ -310,6 +311,7 @@ def build_config(args: argparse.Namespace) -> BatchConfig:
         mirror_source_repository=file_config.get("mirror_source_repository"),
         mirror_source_commit=file_config.get("mirror_source_commit"),
         avacore_max_slots=int(_pick(args, file_config, "avacore_max_slots", 8)),
+        trace_first=bool(args.trace_first or _pick(args, file_config, "trace_first", False)),
     )
     config.validate()
     return config
@@ -525,6 +527,29 @@ class BatchRunner:
             opening = "Start the complete authoring cycle for this candidate."
         if reason:
             opening += f" Previous controller note: {reason}"
+        if self.config.trace_first and not resume:
+            return f"""{opening}
+
+Candidate id: {job.candidate_id}
+Candidate directory: {candidate_dir}
+Work only in the allocated candidate worktree. Read the lightweight authoring
+instructions and create trace data quickly.
+
+Research one allowed scientific source and select several meaningful functions
+when the source provides them. Turn each selected function into an independent
+SciCode top-level problem with exactly one subproblem. The problems do not need
+to be related. Add only enough scientific background to make each function a
+self-contained QA task. Set `candidate_profile` to `function_batch` in
+`candidate.json` when more than one problem is produced, or `function_pair` for
+one problem. Keep the normal SciCode fields and strict solver
+prompt unchanged.
+
+Create the private reference and HDF5 oracle, a redacted solver payload, and
+the required provenance. Run the fast deterministic schema/oracle checks. Do
+not start a child review, do not write a long quality report, and do not call
+the model API directly. Submit one strict AvaCore handoff and stop this
+authoring turn immediately. Do not push.
+"""
         return f"""{opening}
 
 Candidate id: {job.candidate_id}
@@ -897,6 +922,8 @@ candidate artifacts before declaring the candidate complete. Do not push.
                 "--target-count",
                 str(self.config.target_samples),
             ]
+            if self.config.trace_first:
+                command.extend(["--trace-first", "--allow-unreviewed"])
             env["PYTHONPATH"] = os.pathsep.join(
                 part
                 for part in (str(Path(self.config.repository_root) / "src"), env.get("PYTHONPATH", ""))
@@ -1100,6 +1127,10 @@ candidate artifacts before declaring the candidate complete. Do not push.
                     if time.time() - started > self.config.run_timeout_seconds:
                         self._fail(job, "solver run exceeded controller timeout before trace completion")
                 return
+            if self.config.trace_first:
+                job.stage = "delivery"
+                self._deliver(job)
+                return
             if job.round < self.config.max_rounds:
                 self._launch(job, resume=True)
             else:
@@ -1207,6 +1238,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--kimi-home")
     result.add_argument("--mirror-root")
     result.add_argument("--avacore-max-slots", type=int)
+    result.add_argument("--trace-first", action="store_true")
     result.add_argument("--env-file")
     result.add_argument("--merge-accepted", action="store_true", default=None)
     result.add_argument("--cleanup-worktrees", action="store_true", default=None)

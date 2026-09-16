@@ -24,6 +24,11 @@ def main() -> int:
     parser.add_argument("--target-count", type=int, default=10_000)
     parser.add_argument("--allow-unreviewed", action="store_true")
     parser.add_argument(
+        "--trace-first",
+        action="store_true",
+        help="Accept a complete strict trace without child review or release_decision.json",
+    )
+    parser.add_argument(
         "--allow-qa-export",
         action="store_true",
         help="Write QA samples before a promotable run/release decision (never use for final delivery)",
@@ -38,6 +43,7 @@ def main() -> int:
             target_count=args.target_count,
             allow_unreviewed=args.allow_unreviewed,
             allow_qa_export=args.allow_qa_export,
+            trace_first=args.trace_first,
         )
     except (PipelineError, OSError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False))

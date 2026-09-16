@@ -35,10 +35,9 @@
   yield multiple independent, non-duplicated candidate pairs.
 - Make one-step candidates the default production profile. Retain multi-step
   candidates as an explicit exception, not as a requirement for every item.
-- Replace mandatory deep review of every candidate with deterministic gates for
-  every candidate plus sampled/deferred deep review. Any candidate that fails a
-  hard gate is rejected; the sampling policy never bypasses schema, oracle,
-  leakage, provenance, or trace checks.
+- Remove mandatory deep review from the production path. Run only cheap
+  deterministic gates that prevent malformed, private, or untraceable records;
+  reserve deep review for an optional small calibration sample.
 - Run one strict solver attempt by default. Retry only an incomplete or
   infrastructure-failed run; a complete wrong answer remains a valid trace
   observation and is reviewed separately from candidate correctness.
@@ -103,7 +102,7 @@ imperative and role-specific. Require Kimi Code to:
 - implement a reference and private test/oracle generator;
 - record provenance and source-fragment fingerprints;
 - run deterministic schema, static, isolation, duplicate, and oracle checks;
-- request a review child only according to the configured review tier;
+- skip child-agent review in the production path;
 - hand off only through the AvaCore skill;
 - inspect the returned trace and classify it as complete, incomplete, or
   infrastructure-failed; and
@@ -159,21 +158,18 @@ Extend the existing delivery exporter and multiprocess coordinator so that:
 - batch aggregation stops at the configured row target without silently
   converting an incomplete trace into a sample.
 
-## 4. Review tiers
+## 4. Optional review tiers
 
-Implement three explicit tiers in configuration:
+Implement two explicit tiers in configuration:
 
 1. **`smoke`**: deterministic gates plus one trace; used only to test the
    pipeline, never for release data.
-2. **`production`**: deterministic gates, one strict trace, automated trace
-   audit, and sampled review-child/deep scientific review. Any sampled failure
-   blocks that candidate and records the reason.
-3. **`benchmark`**: production gates plus review-child and full trace review for
-   every candidate. Use this for a small calibration set and quality reports,
-   not for the whole 20,000-pair throughput target.
+2. **`calibration`**: production gates plus optional review-child and full trace
+   review for a small sample. Never make this a prerequisite for the whole
+   20,000-pair throughput target.
 
-The first implementation must run a small production-profile batch and compare
-it with a benchmark-profile sample before enabling high concurrency.
+The first implementation must run a small production-profile batch and inspect
+its trace fields before enabling higher concurrency.
 
 ## 5. Files expected to change after approval
 

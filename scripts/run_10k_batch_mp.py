@@ -168,6 +168,7 @@ def worker_loop(worker_id: int, config: dict[str, Any], stop: Any) -> None:
             "drain": True,
             "mirror_root": None,
             "avacore_max_slots": config["avacore_max_slots"],
+            "trace_first": bool(config.get("trace_first", False)),
         }
         config_path = local / "config.json"
         config_path.write_text(json.dumps(batch_config, indent=2) + "\n", encoding="utf-8")
