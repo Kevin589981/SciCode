@@ -80,6 +80,9 @@ def test_pipeline_accepts_avacore_child_review_decision(tmp_path: Path):
 def test_trace_first_delivers_complete_run_without_review_or_release(tmp_path: Path):
     candidate = make_candidate(tmp_path)
     rollouts = make_rollout(candidate)
+    payload = json.loads(rollouts.read_text(encoding="utf-8"))
+    payload["subtraces"][1][1]["reasoning_content"] = "derive the integral"
+    rollouts.write_text(json.dumps(payload) + "\n", encoding="utf-8")
     run_rollouts, run_manifest = _write_run_manifest(candidate, rollouts)
     result = run_candidate_pipeline(
         candidate,
@@ -92,6 +95,20 @@ def test_trace_first_delivers_complete_run_without_review_or_release(tmp_path: P
     assert result["state"] == "accepted"
     assert result["delivery_mode"] == "trace_first"
     assert result["export"]["accepted_samples"] == 2
+
+
+def test_trace_first_rejects_missing_reasoning(tmp_path: Path):
+    candidate = make_candidate(tmp_path)
+    rollouts = make_rollout(candidate)
+    run_rollouts, run_manifest = _write_run_manifest(candidate, rollouts)
+    with pytest.raises(PipelineError, match="trace completeness"):
+        run_candidate_pipeline(
+            candidate,
+            tmp_path / "delivery",
+            rollouts=run_rollouts,
+            run_manifest=run_manifest,
+            trace_first=True,
+        )
 
 
 def test_pipeline_requires_strict_run_manifest_for_final_delivery(tmp_path: Path):
