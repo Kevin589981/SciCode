@@ -11,6 +11,7 @@ from run_10k_batch import (  # noqa: E402
     BatchRunner,
     Job,
     build_kimi_command,
+    build_codex_command,
     build_config,
     parse_env_file,
     parse_json_output,
@@ -44,6 +45,22 @@ def test_kimi_command_uses_prompt_mode_without_incompatible_approval_flags():
     assert command == ["/opt/kimi", "--prompt", "inspect the candidate"]
     assert resumed == ["/opt/kimi", "--session", "session-1", "--prompt", "continue"]
     assert "--auto" not in command and "--yolo" not in command
+
+
+def test_codex_command_uses_company_provider_and_exec_mode():
+    command = build_codex_command(
+        "codex", "create the candidate", model="Kimi-K3", provider="company-kimi"
+    )
+    assert command == [
+        "codex",
+        "exec",
+        "--model",
+        "Kimi-K3",
+        "--config",
+        "model_provider=company-kimi",
+        "--skip-git-repo-check",
+        "create the candidate",
+    ]
 
 
 def test_config_accepts_cli_overrides():

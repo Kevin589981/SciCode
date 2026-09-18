@@ -165,6 +165,26 @@ def build_kimi_command(
     return command
 
 
+def build_codex_command(
+    codex_bin: str,
+    prompt: str,
+    *,
+    model: str,
+    provider: str = "company-kimi",
+) -> list[str]:
+    """Build a non-interactive Codex CLI authoring invocation."""
+    return [
+        codex_bin,
+        "exec",
+        "--model",
+        model,
+        "--config",
+        f"model_provider={provider}",
+        "--skip-git-repo-check",
+        prompt,
+    ]
+
+
 @dataclass
 class BatchConfig:
     repository_root: str
@@ -182,6 +202,10 @@ class BatchConfig:
     run_timeout_seconds: float = 7_200.0
     kimi_bin: str = "kimi"
     kimi_home: str | None = None
+    authoring_cli: str = "kimi"
+    codex_bin: str = "codex"
+    authoring_model: str = "Kimi-K3"
+    codex_provider: str = "company-kimi"
     env_file: str | None = None
     merge_accepted: bool = False
     cleanup_worktrees: bool = False
@@ -193,6 +217,10 @@ class BatchConfig:
     trace_first: bool = False
 
     def validate(self) -> None:
+        if self.authoring_cli not in {"kimi", "codex"}:
+            raise ValueError("authoring_cli must be 'kimi' or 'codex'")
+        if not self.authoring_model.strip():
+            raise ValueError("authoring_model must be non-empty")
         if not ID_PATTERN.fullmatch(self.candidate_prefix):
             raise ValueError("candidate_prefix must contain lowercase path-safe characters")
         if self.start_index < 1:
@@ -303,6 +331,10 @@ def build_config(args: argparse.Namespace) -> BatchConfig:
         run_timeout_seconds=float(_pick(args, file_config, "run_timeout_seconds", 7_200.0)),
         kimi_bin=str(_pick(args, file_config, "kimi_bin", os.getenv("KIMI_BIN", "kimi"))),
         kimi_home=_pick(args, file_config, "kimi_home", os.getenv("KIMI_CODE_HOME")),
+        authoring_cli=str(_pick(args, file_config, "authoring_cli", "kimi")),
+        codex_bin=str(_pick(args, file_config, "codex_bin", "codex")),
+        authoring_model=str(_pick(args, file_config, "authoring_model", "Kimi-K3")),
+        codex_provider=str(_pick(args, file_config, "codex_provider", "company-kimi")),
         env_file=_pick(args, file_config, "env_file", os.getenv("SCICODE_ENV_FILE")),
         merge_accepted=bool(_pick(args, file_config, "merge_accepted", False)),
         cleanup_worktrees=bool(_pick(args, file_config, "cleanup_worktrees", False)),
@@ -479,6 +511,20 @@ class BatchRunner:
             )
         return target
 
+    def _prepare_codex_home(self, job: Job) -> Path:
+        """Create an isolated Codex state directory with a shared read-only config."""
+        target = Path(job.job_root) / "codex-home"
+        codex_dir = target / ".codex"
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        source = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+        source_config = source / "config.toml"
+        destination_config = codex_dir / "config.toml"
+        if source_config.is_file() and not destination_config.exists():
+            destination_config.symlink_to(source_config)
+        for name in ("sessions", "log", "tmp"):
+            (codex_dir / name).mkdir(exist_ok=True)
+        return codex_dir
+
     def _child_env(self, job: Job) -> dict[str, str]:
         # Model traffic must stay direct.  External source commands set their
         # own proxy variables inline according to AGENTS.md.
@@ -488,11 +534,13 @@ class BatchRunner:
             for name, value in base_env.items()
             if name not in PROXY_ENV_NAMES
         }
-        home = self._prepare_kimi_home(job)
+        home = self._prepare_kimi_home(job) if self.config.authoring_cli == "kimi" else None
         if home is not None:
             home = home.resolve()
             env["KIMI_CODE_HOME"] = str(home)
             env["HOME"] = str(home)
+        if self.config.authoring_cli == "codex":
+            env["CODEX_HOME"] = str(self._prepare_codex_home(job))
         env["PWD"] = str(Path(job.worktree_path).expanduser().resolve())
         env["SCICODE_BATCH_ID"] = self.batch_id
         env["SCICODE_CANDIDATE_ID"] = job.candidate_id
@@ -577,6 +625,8 @@ candidate artifacts before declaring the candidate complete. Do not push.
 """
 
     def _session_id(self, job: Job, env: Mapping[str, str]) -> str | None:
+        if self.config.authoring_cli != "kimi":
+            return None
         command = [
             self.config.kimi_bin,
             "session",
@@ -626,19 +676,29 @@ candidate artifacts before declaring the candidate complete. Do not push.
             self._fail(job, "maximum authoring rounds reached")
             return
         env = self._child_env(job)
+        if resume and self.config.authoring_cli == "codex":
+            self._fail(job, "Codex authoring sessions are single-turn; trace-first must avoid resume")
+            return
         if resume:
             if not job.session_id:
                 job.session_id = self._session_id(job, env)
             if not job.session_id:
                 self._fail(job, "cannot find Kimi Code session for resume")
                 return
-        # Prompt mode is already non-interactive in the installed Kimi Code
-        # executable. Its approval flags cannot be combined with --prompt.
-        command = build_kimi_command(
-            self.config.kimi_bin,
-            self._author_prompt(job, resume=resume, reason=reason),
-            session_id=job.session_id if resume else None,
-        )
+        prompt = self._author_prompt(job, resume=resume, reason=reason)
+        if self.config.authoring_cli == "codex":
+            command = build_codex_command(
+                self.config.codex_bin,
+                prompt,
+                model=self.config.authoring_model,
+                provider=self.config.codex_provider,
+            )
+        else:
+            command = build_kimi_command(
+                self.config.kimi_bin,
+                prompt,
+                session_id=job.session_id if resume else None,
+            )
         log_path = self._job_log(job, f"author-round-{job.round + 1}.log")
         log_stream = log_path.open("ab")
         try:
@@ -1209,6 +1269,8 @@ candidate artifacts before declaring the candidate complete. Do not push.
                     ],
                     "kimi_bin": self.config.kimi_bin,
                     "kimi_home": self.config.kimi_home,
+                    "authoring_cli": self.config.authoring_cli,
+                    "authoring_model": self.config.authoring_model,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -1236,6 +1298,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--run-timeout-seconds", type=float)
     result.add_argument("--kimi-bin")
     result.add_argument("--kimi-home")
+    result.add_argument("--authoring-cli", choices=("kimi", "codex"))
+    result.add_argument("--codex-bin")
+    result.add_argument("--authoring-model")
+    result.add_argument("--codex-provider")
     result.add_argument("--mirror-root")
     result.add_argument("--avacore-max-slots", type=int)
     result.add_argument("--trace-first", action="store_true")
