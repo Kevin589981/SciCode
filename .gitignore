@@ -189,3 +189,8 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+
+# scicode-factory artifacts
+.work/
+tasks/
+data/
