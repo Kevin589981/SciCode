@@ -100,11 +100,16 @@ import numpy as np
 import scipy as sp
 import cmath
 
+_SAFE = ("float int str bool len range tuple list set dict abs min max sum "
+         "round enumerate zip sorted reversed divmod pow isinstance all any")
+import builtins as _bi
+_SAFE_BUILTINS = {{n: getattr(_bi, n) for n in _SAFE.split()}}
+
 sys.path.insert(0, {repo_root!r})
 t0 = time.monotonic()
 mod = importlib.import_module({module!r})
 fn = getattr(mod, {function!r})
-ns = {{"__builtins__": {{}}, "np": np, "numpy": np, "sp": sp,
+ns = {{"__builtins__": _SAFE_BUILTINS, "np": np, "numpy": np, "sp": sp,
       "scipy": sp, "math": math, "cmath": cmath}}
 inputs = []
 for expr in {input_exprs!r}:

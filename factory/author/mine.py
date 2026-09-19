@@ -107,10 +107,18 @@ def score_function(source: str, rel_path: str) -> dict | None:
 def iter_py_files(root: Path):
     for p in sorted(root.rglob("*.py")):
         parts = p.relative_to(root).parts
-        if any(seg in ("test", "tests", "testing", "benchmarks", "conftest")
+        if any(seg in ("test", "tests", "testing", "benchmarks", "conftest",
+                       "_external", "vendor", "vendored", "third_party")
                or seg.startswith("test_") for seg in parts):
             continue
         yield p
+
+
+def dotted_module(root: Path, py: Path) -> str:
+    """Dotted module path relative to the IMPORT ROOT (the dir you pass as
+    --repo / --repo-root, which verify puts on sys.path). For src-layout
+    repos point --repo at the directory that CONTAINS the top package."""
+    return ".".join(py.relative_to(root).with_suffix("").parts)
 
 
 def mine_repo(root: Path, max_per_module: int = 3, limit: int | None = None):
@@ -134,7 +142,7 @@ def mine_repo(root: Path, max_per_module: int = 3, limit: int | None = None):
                 continue
             cand = score_function(seg, rel)
             if cand:
-                cand["module_hint"] = rel[:-3].replace("/", ".")
+                cand["module_hint"] = dotted_module(root, py)
                 out.append(cand)
                 per_module[mod_key] = per_module.get(mod_key, 0) + 1
                 if limit and len(out) >= limit:
