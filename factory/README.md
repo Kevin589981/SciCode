@@ -33,6 +33,30 @@ This layer was validated end-to-end on the official validation split
 run artifacts live under `.work/calibration-official/` and are **calibration
 evidence, not QA data**. The machinery is source-agnostic and reused by layer 2.
 
+### 1.5 Environment construction layer (ScienceIDE environments/ workflow)
+
+`envbuild/vet / calibrate / harvest`
+
+Ports the upstream **environment** lifecycle that lives in
+ScienceIDE/environments/ (NOT ScienceInfra, which only consumes built envs):
+repo vetting (pin/archive/sha256/license + hazards + LLM-proposed module
+decomposition with an expert-approval checkpoint), check calibration (the
+measurement toolchain upstream never published: ulp-variant spread, fault
+injection probes, tolerance recommendation, double-run determinism, warrant
+checkpoint), and the writer brief. Produces environments/<env>/{source,
+validation, authoring} mirroring upstream layout.
+
+```
+python -m factory.envbuild.vet --repo <url-or-path> --slug <name> [--commit <sha>] --out environments
+python -m factory.envbuild.calibrate --seed seeds/<slug>.json --repo-root <import-root> \
+    --out environments/<env>/validation/<check>
+python -m factory.envbuild.harvest --env environments/<env>
+```
+
+Human checkpoints kept by design (upstream: "agent proposes, curator
+decides"): module.json `approval` and rubric `warrant.finalized_by` stay
+pending until a human fills them.
+
 ### 2. Authoring + trace layer (the data factory)
 
 ```

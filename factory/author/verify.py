@@ -110,7 +110,8 @@ t0 = time.monotonic()
 mod = importlib.import_module({module!r})
 fn = getattr(mod, {function!r})
 ns = {{"__builtins__": _SAFE_BUILTINS, "np": np, "numpy": np, "sp": sp,
-      "scipy": sp, "math": math, "cmath": cmath}}
+      "scipy": sp, "math": math, "cmath": cmath,
+      "_n": lambda x: np.nextafter(x, np.inf)}}
 inputs = []
 for expr in {input_exprs!r}:
     inputs.append(eval(expr, ns))
