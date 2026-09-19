@@ -19,7 +19,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from . import lib, workspace
+from . import config, lib, workspace
 
 
 def _run_downstream(prob: lib.Problem, tdir: Path, ws_dir: Path, start_idx: int):
@@ -63,7 +63,8 @@ def anchor_task(tdir: Path, problems: dict[str, lib.Problem],
             out["nop"] = {"n_pass": n_pass, "n_downstream": n_down,
                           "score": n_pass / n_down,
                           "floor_expected": floor_expected,
-                          "match": abs(n_pass / n_down - floor_expected) < 1e-9,
+                          # funnel floors are rounded to 6 decimals
+                          "match": abs(n_pass / n_down - floor_expected) < 1e-4,
                           "details": details}
     return out
 
@@ -82,8 +83,12 @@ def main() -> None:
     n_ok = 0
     rep_dir = Path(".work/anchors")
     rep_dir.mkdir(parents=True, exist_ok=True)
-    for tdir in task_dirs:
-        res = anchor_task(tdir, problems, args.oracle_only)
+    # tasks are independent; pool them (sequential runs cost ~2h for 68 tasks)
+    with lib.cf.ThreadPoolExecutor(max_workers=config.N_WORKERS) as pool:
+        futures = [pool.submit(anchor_task, tdir, problems, args.oracle_only)
+                   for tdir in task_dirs]
+        results = [f.result() for f in futures]
+    for res in results:
         oracle_ok = res["oracle"]["reward"] == 1.0
         nop_ok = args.oracle_only or (res["nop"]["match"]
                                       and res["nop"]["score"] < 1.0)

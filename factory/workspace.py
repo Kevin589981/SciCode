@@ -19,6 +19,7 @@ from . import config, lib
 
 RUNNER = '''\
 """Per-step runner materialized by scicode-factory (agent-visible)."""
+import json
 import sys
 from pathlib import Path
 

@@ -50,7 +50,8 @@ def _load_reference_failures(ref_path: Path) -> dict[str, set[str]]:
 
 
 def judge_candidate(cand: dict, problems: dict[str, lib.Problem],
-                    ref_fail: dict[str, set[str]]) -> dict:
+                    ref_fail: dict[str, set[str]],
+                    run_results: dict[int, lib.RunResult] | None = None) -> dict:
     meta = cand["meta"]
     pid, step_id = meta["problem_id"], meta["step_number"]
     prob = problems[pid]
@@ -87,7 +88,10 @@ def judge_candidate(cand: dict, problems: dict[str, lib.Problem],
     n_pass = 0
     for j in prob.downstream_indices(idx):
         sid = prob.steps[j]["step_number"]
-        r = lib.run_script(prob.assemble_script(j, defect=defect))
+        if run_results is not None:
+            r = run_results[j]
+        else:
+            r = lib.run_script(prob.assemble_script(j, defect=defect))
         per_step.append({"step": sid, "status": r.status,
                          "exit": r.exit_code, "wall_sec": round(r.wall_sec, 2),
                          "symptom": lib.last_exception_line(r.stderr_tail)
@@ -145,14 +149,55 @@ def main() -> None:
     counter: Counter = Counter()
     by_family: dict[str, Counter] = defaultdict(Counter)
 
+    # phase 1: submit every (candidate, downstream-step) script to the shared
+    # pool -- a defect early in a long problem ran 11+ sequential scripts when
+    # judged inline (observed: 18+ min per candidate), so pool everything.
+    jobs: dict[tuple[int, int], object] = {}   # (ci, step_idx) -> Future
+    with lib.ScriptPool() as pool:
+        for ci, cand in enumerate(cands):
+            meta = cand["meta"]
+            pid, step_id = meta["problem_id"], meta["step_number"]
+            if pid not in problems:
+                continue
+            prob = problems[pid]
+            idx = lib.step_index_by_number(prob, step_id)
+            dirty = ref_fail.get(pid, set()) & {
+                prob.steps[j]["step_number"] for j in prob.downstream_indices(idx)}
+            if dirty:
+                continue
+            pristine = prob.step_function_source(idx)
+            if not lib.roundtrip_ok(pristine, cand["break"], cand["fix"]):
+                continue
+            try:
+                ast.parse(lib.apply_transform(pristine, cand["break"]))
+            except (lib.TransformError, SyntaxError):
+                continue
+            defect = {"step": idx, "transform": cand["break"]}
+            for j in prob.downstream_indices(idx):
+                jobs[(ci, j)] = pool.submit(prob.assemble_script(j, defect=defect))
+        n_jobs = len(jobs)
+        runs: dict[tuple[int, int], lib.RunResult] = {}
+        done = 0
+        for key, fut in jobs.items():
+            runs[key] = fut.result()
+            done += 1
+            if done % 50 == 0 or done == n_jobs:
+                print(f"  executions {done}/{n_jobs}")
+
+    # phase 2: classify from measured results
+    per_cand_runs: dict[int, dict[int, lib.RunResult]] = defaultdict(dict)
+    for (ci, j), r in runs.items():
+        per_cand_runs[ci][j] = r
     with verdicts_path.open("w", encoding="utf-8") as out:
-        for k, cand in enumerate(cands, 1):
-            v = judge_candidate(cand, problems, ref_fail)
+        for ci, cand in enumerate(cands):
+            v = judge_candidate(cand, problems, ref_fail,
+                                per_cand_runs.get(ci, {}))
             counter[v["status"]] += 1
             by_family[cand["family"]][v["status"]] += 1
             out.write(json.dumps(v) + "\n")
-            if k % 25 == 0 or k == len(cands):
-                print(f"  [{k}/{len(cands)}] {dict(counter)}")
+            ci1 = ci + 1
+            if ci1 % 25 == 0 or ci1 == len(cands):
+                print(f"  [{ci1}/{len(cands)}] {dict(counter)}")
 
     # summary
     lines = ["# Funnel summary", ""]
