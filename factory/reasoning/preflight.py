@@ -7,6 +7,7 @@ input from a solver.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as futures
 import json
 import re
 from collections.abc import Callable
@@ -223,9 +224,12 @@ def run_preflight(
     temperature: float = 0.0,
     max_tokens: int = 2048,
     timeout: int = 1200,
+    concurrency: int = 1,
     errors_path: Path | None = None,
 ) -> dict:
     """Evaluate task JSONL with task-hash resume and append-safe writes."""
+    if concurrency < 1:
+        raise PreflightError("concurrency must be positive")
     tasks = _jsonl(Path(tasks_path))
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,23 +237,33 @@ def run_preflight(
     existing = _jsonl(output_path) if output_path.exists() else []
     done = {row.get("task_hash") for row in existing}
     counts = {"accepted": 0, "rejected": 0, "errors": 0, "skipped": 0}
+    jobs = []
+    for task in tasks:
+        task_hash = canonical_hash(task)
+        if task_hash in done:
+            counts["skipped"] += 1
+        else:
+            jobs.append((task, task_hash))
+
+    def one(job):
+        task, _task_hash = job
+        return preflight_task(
+            task,
+            chat_fn=chat_fn,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+
     with output_path.open("a", encoding="utf-8") as output, Path(errors_path).open(
         "a", encoding="utf-8"
-    ) as errors:
-        for task in tasks:
-            task_hash = canonical_hash(task)
-            if task_hash in done:
-                counts["skipped"] += 1
-                continue
+    ) as errors, futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+        pending = {pool.submit(one, job): job for job in jobs}
+        for future in futures.as_completed(pending):
+            task, task_hash = pending[future]
             try:
-                record = preflight_task(
-                    task,
-                    chat_fn=chat_fn,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout=timeout,
-                )
+                record = future.result()
             except (PreflightError, SchemaError, KeyError, TypeError) as exc:
                 errors.write(
                     json.dumps(
@@ -280,6 +294,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--timeout", type=int, default=1200)
+    parser.add_argument("--concurrency", type=int, default=1)
     args = parser.parse_args()
     result = run_preflight(
         args.tasks,
@@ -288,10 +303,10 @@ def main() -> None:
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         timeout=args.timeout,
+        concurrency=args.concurrency,
     )
     print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

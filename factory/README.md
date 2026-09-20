@@ -94,6 +94,60 @@ Seeds are emitted in the official SciCode record layout with targets in the
 official h5 layout (`<step>/test<i>/var<j>`), so `scicode.parse.
 process_hdf5_to_tuple` and the existing eval stack consume them unchanged.
 
+### 3. Reasoning-first trace factory
+
+`factory.reasoning` is the SFT-oriented path. It borrows ScienceIDE's broad
+proposal and measured-filtering pattern without reproducing the repair
+benchmark or treating executable pass/fail as the definition of data quality.
+
+It produces three task archetypes through a shared schema:
+
+* `derive_implement` — derive a method from scientific assumptions, analyze
+  regimes, then implement it;
+* `diagnose_revise` — distinguish plausible causes from observations and revise
+  a flawed scientific or numerical method;
+* `compare_justify` — compare alternatives under explicit criteria, justify a
+  choice, then deliver an implementation or analysis.
+
+The vertical pipeline is:
+
+```
+mined source -> heterogeneous task authoring -> reasoning-depth preflight
+             -> native-thinking rollout -> outcome-independent trace grading
+             -> canonical thinking-aware SFT
+```
+
+Run the complete pipeline with one source candidate per archetype:
+
+```bash
+export SCICODE_LLM_BASE_URL=http://host:port/v1
+export SCICODE_LLM_API_KEY=dummy
+export SCICODE_LLM_MODEL=Kimi-K3
+
+python -m factory.reasoning.pipeline \
+    --mined .work/scipy-mined.jsonl \
+    --repo-meta .work/scipy-repo-meta.json \
+    --out-dir data-reasoning-smoke \
+    --limit 3 --attempts 1 --max-tokens 16384 \
+    --timeout 2400 --concurrency 3
+```
+
+The primary files are:
+
+| file | purpose |
+|---|---|
+| `tasks.jsonl` | validated task contracts and private source provenance |
+| `preflight.jsonl` | structural and semantic reasoning-depth admission |
+| `traces.jsonl` | verbatim messages, including native `reasoning_content` |
+| `grades.jsonl` | scientific trace-value scores and per-message loss policy |
+| `sft.jsonl` | canonical training records with separate reasoning/content masks |
+| `run_manifest.json` | code, model, parameter, input, and artifact hashes |
+
+`sft.jsonl` selection is controlled by reasoning quality, not `reward == 1`.
+Executable outcomes may be attached to traces as auxiliary evidence. The
+canonical format keeps `reasoning_content` even when `--inline-thinking` is used;
+trainer-specific conversion must not silently discard it.
+
 ## Configuration
 
 Environment variables:
@@ -119,3 +173,6 @@ Environment variables:
 * Demo: two hand-written proposals over scipy `inconsistent` / `vq` pass all
   gates (`seeds-demo/`); the LLM proposal stage only scales once an endpoint
   is configured.
+* The reasoning-first v1 judge is model-based and should be calibrated against
+  human-reviewed traces before producing a large training mixture. The initial
+  three-task Kimi run is a plumbing smoke test, not evidence of difficulty.

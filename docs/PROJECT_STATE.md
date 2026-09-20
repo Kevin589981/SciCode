@@ -57,6 +57,9 @@ training path that silently drops `reasoning_content`.
 - Canonical local repository: `D:/1/desktop/scienceIDE/SciCode`
 - Canonical branch: `scienceide-pipeline`
 - Last pre-redesign commit: `86a69ba`
+- Active development worktree:
+  `D:/1/desktop/scienceIDE/scicode-work/reasoning-factory-wt`
+- Active development branch: `feature/reasoning-trace-factory-v1`
 - Remote execution checkout: `/root/ScienceIDE-workspace/SciCode`
 - Factory code: `factory/`
 - Existing pipeline: vet -> mine -> propose -> verify -> calibrate -> harvest ->
@@ -84,7 +87,7 @@ Each smoke run must record at least:
 
 Do not rely on ad-hoc tar synchronization for final experiments.
 
-## Redesign Direction
+## Redesign Direction and Implementation Progress
 
 The next factory version must add:
 
@@ -97,6 +100,19 @@ The next factory version must add:
    provenance;
 7. a Kimi-K3 16k-context smoke test after the local and remote code are synced.
 
+Implemented on `feature/reasoning-trace-factory-v1`:
+
+- `6dfb708`: canonical task/trace/grade schemas and stable hashing;
+- `5a09a4a`: three-archetype reasoning task composition;
+- `5ea89c5`: deterministic plus semantic task-depth preflight;
+- `b52e9c0`: native-thinking rollout collection with auxiliary outcomes;
+- `e64ec79`: outcome-independent trace-value grading;
+- `09c8f48`: thinking-preserving SFT export with separate masks.
+
+The remaining v1 work is to finalize the one-command orchestrator and docs, run
+the full offline test suite, push/synchronize the exact commit to `yicloud`, and
+complete the three-task Kimi-K3 16k smoke.
+
 ## Smoke Endpoint
 
 - Base URL: `http://10.100.184.127:5050/v1`
@@ -104,9 +120,10 @@ The next factory version must add:
 - The endpoint is slow. Use a 16k output budget and a sufficiently long request
   timeout. Do not put credentials or generated traces in Git.
 
-## Open Design Decision
+## Resolved Design Decision
 
-Choose the first reasoning-task family to implement and use for the initial 16k
-smoke. The choice determines the task schema, author prompt, grader rubric, and
-test fixtures.
+The first smoke uses a small heterogeneous core: one `derive_implement`, one
+`diagnose_revise`, and one `compare_justify` task through a common schema. This
+prevents the redesign from replacing the old function-implementation monoculture
+with a different single archetype.
 

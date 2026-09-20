@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as futures
 import json
 import re
 from collections.abc import Callable, Iterable
@@ -146,9 +147,12 @@ def run_authoring(
     temperature: float = 0.3,
     max_tokens: int = 8192,
     timeout: int = 1200,
+    concurrency: int = 1,
     errors_path: Path | None = None,
 ) -> dict:
-    """Compose tasks sequentially with append-safe task-ID resume."""
+    """Compose tasks with bounded concurrency and append-safe task-ID resume."""
+    if concurrency < 1:
+        raise AuthorError("concurrency must be positive")
     candidates = _read_jsonl(Path(mined_path))
     if limit is not None:
         candidates = candidates[:limit]
@@ -161,26 +165,36 @@ def run_authoring(
     errors_path = errors_path or output_path.with_suffix(".errors.jsonl")
     done = _existing_ids(output_path)
     counts = {"written": 0, "skipped": 0, "errors": 0}
+    jobs = []
+    for index, candidate in enumerate(candidates):
+        archetype = archetypes[index % len(archetypes)]
+        task_id = task_id_for(candidate, archetype, repo_meta)
+        if task_id in done:
+            counts["skipped"] += 1
+        else:
+            jobs.append((candidate, archetype, task_id))
+
+    def one(job):
+        candidate, archetype, _task_id = job
+        return compose_task(
+            candidate,
+            archetype,
+            repo_meta,
+            chat_fn=chat_fn,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+
     with output_path.open("a", encoding="utf-8") as output, Path(errors_path).open(
         "a", encoding="utf-8"
-    ) as errors:
-        for index, candidate in enumerate(candidates):
-            archetype = archetypes[index % len(archetypes)]
-            task_id = task_id_for(candidate, archetype, repo_meta)
-            if task_id in done:
-                counts["skipped"] += 1
-                continue
+    ) as errors, futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+        pending = {pool.submit(one, job): job for job in jobs}
+        for future in futures.as_completed(pending):
+            candidate, archetype, task_id = pending[future]
             try:
-                task = compose_task(
-                    candidate,
-                    archetype,
-                    repo_meta,
-                    chat_fn=chat_fn,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout=timeout,
-                )
+                task = future.result()
             except Exception as exc:
                 errors.write(
                     json.dumps(
@@ -214,6 +228,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.3)
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--timeout", type=int, default=1200)
+    parser.add_argument("--concurrency", type=int, default=1)
     args = parser.parse_args()
     result = run_authoring(
         args.mined,
@@ -225,10 +240,10 @@ def main() -> None:
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         timeout=args.timeout,
+        concurrency=args.concurrency,
     )
     print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
     main()
-
