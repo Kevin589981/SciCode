@@ -62,15 +62,71 @@ def extract_code(content: str) -> str | None:
     return code.strip() or None
 
 
+ALLCLOSE = re.compile(
+    r"^assert\s+np\.allclose\((.*),\s*target\s*,\s*atol=([^,]+),\s*rtol=([^\)]+)\)\s*$",
+    re.S)
+
+
+def _diagnostic_test(i: int, n: int, case: str) -> list[str] | None:
+    """Rewrite one `assert np.allclose(call, target, atol=, rtol=)` case into
+    a per-test diagnostic block that reports magnitude/localization instead
+    of dying silently at the first failure. Returns None if the case does
+    not match the expected shape (caller falls back to verbatim)."""
+    m = ALLCLOSE.match(case.strip())
+    if not m:
+        return None
+    call, atol, rtol = m.group(1), m.group(2), m.group(3)
+    t = i + 1
+    return [
+        f"target = targets[{i}]",
+        f"_a = {call}",
+        "_t = target",
+        "try:",
+        f"    _ok = np.allclose(_a, _t, atol={atol}, rtol={rtol})",
+        "except Exception as _e:",
+        f'    print(f"[verifier] test {t}/{n} ERROR: '
+        + '{type(_e).__name__}: {_e}")',
+        f"    _failed.append({i})",
+        "else:",
+        "    if not _ok:",
+        "        try:",
+        "            _d = np.abs(np.asarray(_a, dtype=float)"
+        " - np.asarray(_t, dtype=float))",
+        f'            print(f"[verifier] test {t}/{n} FAIL '
+        + 'max_abs_diff={float(_d.max()):.6g} shape={np.shape(_a)}")',
+        "        except Exception:",
+        f'            print(f"[verifier] test {t}/{n} FAIL '
+        + '(got {type(_a).__name__}, expected'
+        + ' {type(_t).__name__})")',
+        f"        _failed.append({i})",
+    ]
+
+
 def run_verifier(seed: dict, code: str, h5: Path, timeout: int = 300) -> dict:
     s = seed["sub_steps"][0]
     n = len(s["test_cases"])
     lines = [seed["required_dependencies"], "", code, "",
              "from scicode.parse.parse import process_hdf5_to_tuple",
-             f"targets = process_hdf5_to_tuple({s['step_number']!r}, {n}, {str(h5)!r})"]
+             f"targets = process_hdf5_to_tuple({s['step_number']!r}, {n}, {str(h5)!r})",
+             "_failed = []"]
     for i in range(n):
-        lines.append(f"target = targets[{i}]")
-        lines.extend(s["test_cases"][i].split("\n"))
+        diag = _diagnostic_test(i, n, s["test_cases"][i])
+        if diag is not None:
+            lines.extend(diag)
+        else:  # legacy/non-standard case: verbatim, still localized by index
+            lines.append(f"target = targets[{i}]")
+            lines.append("try:")
+            lines.extend("    " + ln for ln in s["test_cases"][i].split("\n"))
+            lines.append("except Exception as _e:")
+            lines.append(f'    print(f"[verifier] test {i + 1}/{n} raised: '
+                         '{type(_e).__name__}: {_e}")')
+            lines.append(f"    _failed.append({i})")
+    lines += ["", "if _failed:",
+              '    print(f"[verifier] passed {len(targets) - len(_failed)}/'
+              '{len(targets)}")',
+              "    raise SystemExit(1)",
+              'else:',
+              '    print(f"[verifier] passed {len(targets)}/{len(targets)}")']
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as fp:
         fp.write("\n".join(lines))
         path = fp.name
@@ -78,24 +134,44 @@ def run_verifier(seed: dict, code: str, h5: Path, timeout: int = 300) -> dict:
     try:
         r = subprocess.run([sys.executable, path], capture_output=True,
                            text=True, timeout=timeout)
+        diag_out = (r.stdout or "").strip()
+        n_passed = None
+        for ln in diag_out.splitlines():
+            if ln.startswith("[verifier] passed"):
+                try:
+                    n_passed = int(ln.split()[2].split("/")[0])
+                except (IndexError, ValueError):
+                    pass
         status = "pass" if r.returncode == 0 else "fail"
         err = (r.stderr or "").strip()
         return {"status": status, "exit": r.returncode,
                 "wall_sec": round(time.monotonic() - t0, 2),
+                "n_passed": n_passed if n_passed is not None
+                            else (n if status == "pass" else 0),
+                "n_total": n,
+                "diagnostics": diag_out[-1200:],
                 "stderr_tail": err[-800:]}
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "exit": None, "wall_sec": timeout,
+                "n_passed": 0, "n_total": n, "diagnostics": "",
                 "stderr_tail": ""}
     finally:
         Path(path).unlink(missing_ok=True)
 
 
 def feedback_message(verifier: dict, turn: int) -> str:
-    tail = verifier["stderr_tail"].strip().splitlines()
-    last = tail[-1] if tail else "(no output)"
-    return (f"Verifier turn {turn}: {verifier['status']}.\n"
-            f"Last error: {last}\nFix the implementation and respond with a "
-            "corrected ```python block.")
+    parts = [f"Verifier turn {turn}: {verifier['status']}. "
+             f"{verifier.get('n_passed', '?')}/{verifier.get('n_total', '?')}"
+             " tests passed."]
+    diag = (verifier.get("diagnostics") or "").strip()
+    if diag:
+        parts.append(diag)
+    tail = (verifier.get("stderr_tail") or "").strip().splitlines()
+    if tail and not diag:
+        parts.append(f"Last error: {tail[-1]}")
+    parts.append("Fix the implementation and respond with a corrected "
+                 "```python block.")
+    return "\n".join(parts)
 
 
 def solve_seed(seed: dict, h5: Path, attempts: int, max_turns: int,
@@ -121,6 +197,8 @@ def solve_seed(seed: dict, h5: Path, attempts: int, max_turns: int,
             else:
                 v = run_verifier(seed, code, h5)
             verifier_log.append({"turn": turn, **v})
+            if v["status"] in ("pass", "fail"):
+                reward = (v.get("n_passed") or 0) / max(v.get("n_total") or 1, 1)
             if v["status"] == "pass":
                 reward = 1
                 break
