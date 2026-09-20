@@ -148,6 +148,70 @@ Executable outcomes may be attached to traces as auxiliary evidence. The
 canonical format keeps `reasoning_content` even when `--inline-thinking` is used;
 trainer-specific conversion must not silently discard it.
 
+### Batch repository factory
+
+`factory.reasoning.batch` scales the reasoning-first path across public
+scientific repositories. The design follows a staged funnel instead of asking
+an expensive model to browse an unbounded repository universe:
+
+```
+curated science queries -> rate-limited GitHub metadata search -> deduplicate
+  -> pin exact HEAD commits -> durable repository queue -> README relevance
+  -> license gate -> AST mining -> repository-intent × code-evidence ranking
+  -> three-archetype reasoning pipeline -> isolated SFT shards -> aggregation
+```
+
+Discovery writes a sibling error JSONL and continues past individually failed
+queries or commit pins after the built-in retries are exhausted.
+
+A bounded one-command run is:
+
+```bash
+python -m factory.reasoning.batch auto \
+  --output-root .work/reasoning-batch \
+  --cache-root .work/repository-cache \
+  --query-limit 3 --repository-limit 10 \
+  --workers 4 --repository-slots 2 --llm-slots 3 \
+  --profile-model Kimi-K3 --author-model Kimi-K3 \
+  --critic-model Kimi-K3 --solver-model Kimi-K3 --judge-model Kimi-K3
+```
+
+For production, discovery/enqueue, workers, status, and aggregation can be run
+separately:
+
+```bash
+python -m factory.reasoning.discovery \
+  --out .work/catalog.jsonl --min-stars 10 --limit 100
+
+python -m factory.reasoning.batch enqueue \
+  --db .work/batch.sqlite3 --catalog .work/catalog.jsonl \
+  --llm-slots 3 --repository-slots 2 \
+  --profile-model Kimi-K3 --author-model Kimi-K3 \
+  --critic-model Kimi-K3 --solver-model Kimi-K3 --judge-model Kimi-K3
+
+python -m factory.reasoning.batch worker \
+  --db .work/batch.sqlite3 --cache-root .work/repository-cache \
+  --output-root .work/reasoning-batch
+
+python -m factory.reasoning.batch aggregate \
+  --db .work/batch.sqlite3 --out .work/reasoning-batch/sft.jsonl
+```
+
+The queue uses SQLite WAL, atomic job leases, job/resource heartbeats, bounded
+retries, and process-global resource slots. A repository snapshot plus the
+canonical recipe hash defines job identity, so replaying the same enqueue is
+idempotent while a model/configuration change creates a new shard. Each
+repository writes only to
+`repositories/<slug>/<job-id>/`; aggregation reads completed shards, sorts by
+`trace_id`, rejects conflicting duplicates, and atomically replaces the global
+JSONL. Slot counts are immutable within a queue so independent workers cannot
+silently choose incompatible concurrency budgets.
+
+This SQLite implementation is deliberately single-host. Multiple processes on
+one machine are supported; a multi-node deployment should preserve the same
+lease and idempotency protocol over a network database rather than place the
+SQLite file on an arbitrary shared filesystem.
+
 ## Configuration
 
 Environment variables:
@@ -176,3 +240,7 @@ Environment variables:
 * The reasoning-first v1 judge is model-based and should be calibrated against
   human-reviewed traces before producing a large training mixture. The initial
   three-task Kimi run is a plumbing smoke test, not evidence of difficulty.
+* Batch discovery uses a curated vocabulary plus optional model expansion. The
+  current dual-evidence function ranker is lexical, intentionally cheap and
+  auditable; embedding retrieval and a calibrated scientific verifier remain
+  quality upgrades, not prerequisites for race-safe production.

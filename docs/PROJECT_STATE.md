@@ -56,7 +56,7 @@ training path that silently drops `reasoning_content`.
 
 - Canonical local repository: `D:/1/desktop/scienceIDE/SciCode`
 - Canonical branch: `scienceide-pipeline`
-- Last pre-redesign commit: `86a69ba`
+- Last synchronized reasoning-factory commit: `0c1c306`
 - Active development worktree:
   `D:/1/desktop/scienceIDE/scicode-work/reasoning-factory-wt`
 - Active development branch: `feature/reasoning-trace-factory-v1`
@@ -67,9 +67,9 @@ training path that silently drops `reasoning_content`.
 - Existing data is dominated by single-function SciPy implementation tasks with
   three generated test inputs. This is considered a smoke baseline, not the
   target task distribution.
-- Existing raw traces preserve Kimi-K3 `reasoning_content`.
-- Existing SFT export incorrectly couples selection to full reward and marks
-  every assistant response as supervised.
+- Raw traces and canonical SFT preserve Kimi-K3 `reasoning_content` with
+  separate content/reasoning loss masks.
+- SFT selection is driven by scientific trace value rather than full reward.
 - Multi-step call-chain generation is experimental and does not by itself solve
   the reasoning-depth problem.
 
@@ -109,9 +109,34 @@ Implemented on `feature/reasoning-trace-factory-v1`:
 - `e64ec79`: outcome-independent trace-value grading;
 - `09c8f48`: thinking-preserving SFT export with separate masks.
 
-The remaining v1 work is to finalize the one-command orchestrator and docs, run
-the full offline test suite, push/synchronize the exact commit to `yicloud`, and
-complete the three-task Kimi-K3 16k smoke.
+Reasoning-first v1 is complete and synchronized. The three-task Kimi-K3 16k
+smoke produced one selected SFT row for every archetype (3 tasks, 3 admitted
+preflights, 3 traces, 3 grades, 3 SFT rows). All three auxiliary executable
+outcomes were `not_run`; this is acceptable because outcome is not the trace
+selection criterion. The SFT artifact SHA-256 is
+`a1be8bc6f6e177ef2f60ce93c6a4d5704e6c409ac447600f93edb43df99851de`.
+
+Batch production v2 is implemented locally:
+
+- curated/optionally expanded scientific query discovery with serial,
+  rate-limit-aware GitHub Search;
+- metadata filtering and repository-ID deduplication before clone or LLM use;
+- immutable default-branch commit pinning for admitted catalog entries;
+- per-query/per-repository discovery error ledgers so one deleted or transiently
+  unavailable candidate does not discard an otherwise valid batch;
+- SQLite WAL job/resource leases, expiry recovery, heartbeats, retries, and
+  event audit;
+- queue-global LLM/repository slots plus a per-repository mutex;
+- fixed-schema repository screening, license gate, AST mining, and
+  repository-intent × code-evidence ranking;
+- job identity over source snapshot and canonical production recipe;
+- isolated repository/job artifact shards and deterministic atomic aggregation;
+- split enqueue/worker/status/aggregate commands and a bounded `auto` command.
+
+Offline verification currently passes 45 tests plus 6 subtests. The remaining
+operational step is to commit/push v2, advance the `yicloud` checkout to the
+same commit, and run a small real GitHub discovery smoke before large-scale
+generation.
 
 ## Smoke Endpoint
 

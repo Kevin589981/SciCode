@@ -1,0 +1,41 @@
+# Broad computational-science seeds. One term per line; comments are ignored.
+numerical analysis
+scientific computing
+finite element method
+finite volume method
+spectral method
+ordinary differential equations
+partial differential equations
+computational fluid dynamics
+computational mechanics
+computational physics
+computational chemistry
+quantum chemistry
+molecular dynamics
+materials modeling
+electronic structure
+astrophysics simulation
+plasma simulation
+climate modeling
+ocean modeling
+geophysical modeling
+remote sensing
+bioinformatics
+genomics
+proteomics
+systems biology
+computational neuroscience
+pharmacokinetics
+medical imaging
+signal processing
+control systems
+optimization algorithms
+uncertainty quantification
+monte carlo simulation
+bayesian inference
+scientific machine learning
+physics informed neural networks
+quantum computing simulation
+robotics dynamics
+inverse problems
+computational geometry
