@@ -368,6 +368,9 @@ def process_repository(
     max_mined_candidates: int = 600,
     allow_unknown_license: bool = False,
     max_tokens: int = 16384,
+    critic_max_tokens: int = 4096,
+    verifier_max_tokens: int = 4096,
+    judge_max_tokens: int = 8192,
     timeout: int = 2400,
     pipeline_concurrency: int = 3,
 ) -> dict:
@@ -505,6 +508,9 @@ def process_repository(
         additional_judge_models=additional_judge_models,
         limit=tasks_per_repo,
         max_tokens=max_tokens,
+        critic_max_tokens=critic_max_tokens,
+        verifier_max_tokens=verifier_max_tokens,
+        judge_max_tokens=judge_max_tokens,
         timeout=timeout,
         concurrency=pipeline_concurrency,
     )

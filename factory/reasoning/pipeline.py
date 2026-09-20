@@ -53,6 +53,9 @@ def run_pipeline(
     author_temperature: float = 0.3,
     solver_temperature: float = 0.7,
     max_tokens: int = 16384,
+    critic_max_tokens: int = 4096,
+    verifier_max_tokens: int = 4096,
+    judge_max_tokens: int = 8192,
     timeout: int = 2400,
     concurrency: int = 3,
     author_attempts: int = 2,
@@ -102,7 +105,7 @@ def run_pipeline(
         paths["preflight"],
         chat_fn=chat_fn,
         model=critic_model,
-        max_tokens=max_tokens,
+        max_tokens=critic_max_tokens,
         timeout=timeout,
         concurrency=concurrency,
     )
@@ -111,7 +114,7 @@ def run_pipeline(
         paths["verification"],
         chat_fn=chat_fn,
         model=verifier_model,
-        max_tokens=max_tokens,
+        max_tokens=verifier_max_tokens,
         timeout=timeout,
         concurrency=concurrency,
     )
@@ -140,7 +143,7 @@ def run_pipeline(
             paths["grades"],
             chat_fn=chat_fn,
             model=active_judge,
-            max_tokens=max_tokens,
+            max_tokens=judge_max_tokens,
             timeout=timeout,
             concurrency=concurrency,
         )
@@ -182,6 +185,9 @@ def run_pipeline(
             "author_temperature": author_temperature,
             "solver_temperature": solver_temperature,
             "max_tokens": max_tokens,
+            "critic_max_tokens": critic_max_tokens,
+            "verifier_max_tokens": verifier_max_tokens,
+            "judge_max_tokens": judge_max_tokens,
             "timeout": timeout,
             "concurrency": concurrency,
             "author_attempts": author_attempts,
@@ -225,6 +231,9 @@ def main() -> None:
     parser.add_argument("--author-temperature", type=float, default=0.3)
     parser.add_argument("--solver-temperature", type=float, default=0.7)
     parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--critic-max-tokens", type=int, default=4096)
+    parser.add_argument("--verifier-max-tokens", type=int, default=4096)
+    parser.add_argument("--judge-max-tokens", type=int, default=8192)
     parser.add_argument("--timeout", type=int, default=2400)
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--author-attempts", type=int, default=2)
@@ -245,6 +254,9 @@ def main() -> None:
         author_temperature=args.author_temperature,
         solver_temperature=args.solver_temperature,
         max_tokens=args.max_tokens,
+        critic_max_tokens=args.critic_max_tokens,
+        verifier_max_tokens=args.verifier_max_tokens,
+        judge_max_tokens=args.judge_max_tokens,
         timeout=args.timeout,
         concurrency=args.concurrency,
         author_attempts=args.author_attempts,

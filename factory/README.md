@@ -133,6 +133,12 @@ python -m factory.reasoning.pipeline \
     --timeout 2400 --concurrency 3
 ```
 
+`--max-tokens` is reserved for authoring and solver traces, where long-form
+reasoning is useful. The bounded defaults for the critic, source verifier, and
+judge are respectively 4096, 4096, and 8192 tokens; override them with
+`--critic-max-tokens`, `--verifier-max-tokens`, and `--judge-max-tokens`.
+This prevents a 16k solver budget from multiplying the cost of every gate.
+
 The primary files are:
 
 | file | purpose |

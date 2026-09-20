@@ -188,7 +188,7 @@ class ReasoningPipelineTests(unittest.TestCase):
 
             def fake_chat(messages, **kwargs):
                 text = messages[0]["content"]
-                calls.append((text[:40], kwargs["model"]))
+                calls.append((text, kwargs["model"], kwargs["max_tokens"]))
                 if "authoring a reasoning-intensive" in text:
                     archetype = text.split("Task archetype: ", 1)[1].splitlines()[0]
                     return {
@@ -222,6 +222,10 @@ class ReasoningPipelineTests(unittest.TestCase):
                 limit=3,
                 concurrency=2,
                 factory_commit="commit123",
+                max_tokens=16000,
+                critic_max_tokens=3000,
+                verifier_max_tokens=4000,
+                judge_max_tokens=5000,
             )
             call_count = len(calls)
             second = run_pipeline(
@@ -238,6 +242,10 @@ class ReasoningPipelineTests(unittest.TestCase):
                 limit=3,
                 concurrency=2,
                 factory_commit="commit123",
+                max_tokens=16000,
+                critic_max_tokens=3000,
+                verifier_max_tokens=4000,
+                judge_max_tokens=5000,
             )
             tasks = [
                 json.loads(line)
@@ -261,6 +269,27 @@ class ReasoningPipelineTests(unittest.TestCase):
             self.assertEqual(first["artifacts"]["sft"]["rows"], 3)
             self.assertEqual(first["artifacts"]["grades"]["rows"], 6)
             self.assertEqual(first["models"]["judges"], ["judge", "judge-2"])
+            self.assertEqual(first["parameters"]["critic_max_tokens"], 3000)
+            self.assertTrue(all(
+                max_tokens == 3000
+                for prompt, _model, max_tokens in calls
+                if "independent critic" in prompt
+            ))
+            self.assertTrue(all(
+                max_tokens == 4000
+                for prompt, _model, max_tokens in calls
+                if "independent scientific task verifier" in prompt
+            ))
+            self.assertTrue(all(
+                max_tokens == 5000
+                for prompt, _model, max_tokens in calls
+                if "TRAINING VALUE" in prompt
+            ))
+            self.assertTrue(all(
+                max_tokens == 16000
+                for prompt, model, max_tokens in calls
+                if model in {"author", "solver"}
+            ))
             self.assertEqual(len(calls), call_count)
             self.assertEqual(second["stages"]["author"]["skipped"], 3)
 

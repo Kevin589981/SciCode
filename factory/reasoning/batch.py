@@ -161,6 +161,9 @@ def process_lease(
                 max_mined_candidates=int(recipe.get("max_mined_candidates", 600)),
                 allow_unknown_license=bool(recipe.get("allow_unknown_license", False)),
                 max_tokens=int(recipe.get("max_tokens", 16384)),
+                critic_max_tokens=int(recipe.get("critic_max_tokens", 4096)),
+                verifier_max_tokens=int(recipe.get("verifier_max_tokens", 4096)),
+                judge_max_tokens=int(recipe.get("judge_max_tokens", 8192)),
                 timeout=int(recipe.get("timeout", 2400)),
                 pipeline_concurrency=int(recipe.get("pipeline_concurrency", 3)),
             )
@@ -362,6 +365,9 @@ def _recipe_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-mined-candidates", type=int, default=600)
     parser.add_argument("--allow-unknown-license", action="store_true")
     parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--critic-max-tokens", type=int, default=4096)
+    parser.add_argument("--verifier-max-tokens", type=int, default=4096)
+    parser.add_argument("--judge-max-tokens", type=int, default=8192)
     parser.add_argument("--timeout", type=int, default=2400)
     parser.add_argument("--pipeline-concurrency", type=int, default=3)
 
@@ -381,6 +387,9 @@ def recipe_from_args(args) -> dict:
         "max_mined_candidates": args.max_mined_candidates,
         "allow_unknown_license": args.allow_unknown_license,
         "max_tokens": args.max_tokens,
+        "critic_max_tokens": args.critic_max_tokens,
+        "verifier_max_tokens": args.verifier_max_tokens,
+        "judge_max_tokens": args.judge_max_tokens,
         "timeout": args.timeout,
         "pipeline_concurrency": args.pipeline_concurrency,
     }
