@@ -384,6 +384,11 @@ def main() -> None:
     auto_parser.add_argument("--min-stars", type=int, default=10)
     auto_parser.add_argument("--max-size-kb", type=int, default=1_000_000)
     auto_parser.add_argument("--language", default="Python")
+    auto_parser.add_argument(
+        "--search-scope",
+        choices=("name,description", "name,description,readme"),
+        default="name,description",
+    )
     auto_parser.add_argument("--pages-per-query", type=int, default=1)
     auto_parser.add_argument("--per-page", type=int, default=30)
     auto_parser.add_argument(
@@ -462,6 +467,7 @@ def main() -> None:
         keywords = keywords[: args.query_limit]
     github = GitHubClient(
         resolve_github_token(),
+        search_scope=args.search_scope,
         request_interval=args.request_interval,
     )
     discovery_errors = []

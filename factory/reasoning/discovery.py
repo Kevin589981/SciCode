@@ -145,12 +145,16 @@ class GitHubClient:
         self,
         token: str | None = None,
         *,
+        search_scope: str = "name,description",
         request_interval: float = 2.1,
         retries: int = 4,
         timeout: int = 60,
         sleep_fn: Callable[[float], None] = time.sleep,
     ):
+        if search_scope not in {"name,description", "name,description,readme"}:
+            raise DiscoveryError(f"unsupported GitHub search scope: {search_scope}")
         self.token = token
+        self.search_scope = search_scope
         self.request_interval = max(0.0, request_interval)
         self.retries = retries
         self.timeout = timeout
@@ -209,8 +213,8 @@ class GitHubClient:
         per_page: int,
     ) -> list[dict]:
         query_parts = [
-            f'"{keyword}"',
-            "in:name,description,readme",
+            keyword,
+            f"in:{self.search_scope}",
             f"stars:>={min_stars}",
             "archived:false",
             "fork:false",
@@ -307,9 +311,14 @@ def _candidate(item: dict, keyword: str) -> dict | None:
 def metadata_rejection(candidate: dict) -> str | None:
     """Reject high-confidence documentation/list repositories before cloning."""
     name = str(candidate.get("full_name") or "").rsplit("/", 1)[-1]
+    compact_name = re.sub(r"[^a-z0-9]", "", name.casefold())
     description = str(candidate.get("description") or "")
     topics = {str(value).casefold() for value in candidate.get("topics") or []}
-    if DOCUMENTATION_NAME_RE.search(name):
+    if (
+        DOCUMENTATION_NAME_RE.search(name)
+        or "hacktoberfest" in compact_name
+        or compact_name.endswith(("papers", "paperlist", "readinglist"))
+    ):
         return "documentation_or_collection_name"
     if DOCUMENTATION_DESCRIPTION_RE.search(description):
         return "documentation_or_collection_description"
@@ -464,6 +473,11 @@ def main() -> None:
     parser.add_argument("--min-stars", type=int, default=10)
     parser.add_argument("--max-size-kb", type=int, default=1_000_000)
     parser.add_argument("--language", default="Python")
+    parser.add_argument(
+        "--search-scope",
+        choices=("name,description", "name,description,readme"),
+        default="name,description",
+    )
     parser.add_argument("--pages-per-query", type=int, default=1)
     parser.add_argument("--per-page", type=int, default=30)
     parser.add_argument(
@@ -490,6 +504,7 @@ def main() -> None:
         keywords = keywords[: args.query_limit]
     client = GitHubClient(
         resolve_github_token(),
+        search_scope=args.search_scope,
         request_interval=args.request_interval,
     )
     errors = []

@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from factory.reasoning.discovery import (
+    GitHubClient,
     discover_repositories,
     expand_keywords,
     load_keywords,
@@ -176,6 +177,31 @@ class ReasoningDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(rejections[0]["reason"], "documentation_or_collection_name")
         self.assertIsNone(metadata_rejection(rows[0]))
+        self.assertEqual(
+            metadata_rejection(
+                repository(3, "idrl-lab/PINNpapers", description="PINN research")
+            ),
+            "documentation_or_collection_name",
+        )
+
+    def test_default_search_is_high_precision_metadata_scope(self):
+        urls = []
+        client = GitHubClient(request_interval=0)
+
+        def get(url):
+            urls.append(url)
+            return {"items": []}, {}
+
+        client._get = get
+        client.search(
+            "numerical analysis",
+            min_stars=10,
+            language="Python",
+            pages=1,
+            per_page=10,
+        )
+        self.assertIn("in%3Aname%2Cdescription", urls[0])
+        self.assertNotIn("readme", urls[0])
 
 
 if __name__ == "__main__":

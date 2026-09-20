@@ -161,10 +161,12 @@ curated science queries -> rate-limited GitHub metadata search -> deduplicate
   -> three-archetype reasoning pipeline -> isolated SFT shards -> aggregation
 ```
 
-Discovery rejects high-confidence awesome lists, curricula, paper/book lists,
-and other documentation collections from metadata before any clone or LLM
-call. It writes sibling rejection and error JSONLs and continues past
-individually failed queries or commit pins after retries are exhausted.
+Discovery defaults to a high-precision `name,description` search scope. The
+broader `name,description,readme` scope is opt-in. It rejects high-confidence
+awesome lists, curricula, paper/book lists, and other documentation collections
+from metadata before any clone or LLM call. It writes sibling rejection and
+error JSONLs and continues past individually failed queries or commit pins after
+retries are exhausted.
 
 A bounded one-command run is:
 

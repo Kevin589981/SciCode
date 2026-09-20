@@ -45,7 +45,9 @@ enter the durable queue. Sources:
    and rank candidates by independent keyword matches and stars. Persist
    exhausted per-query failures without throwing away successful queries.
    Reject strong documentation/list/curriculum signals here and retain a
-   rejection ledger, before spending clone or model capacity.
+   rejection ledger, before spending clone or model capacity. Default to
+   high-precision name/description search; use README-wide search only when a
+   deliberate recall pass is worth its much noisier candidate stream.
 3. Resolve the final candidates' mutable default branches to exact commit SHAs.
 4. Enqueue one job per `(repository snapshot, canonical recipe)` in SQLite.
 5. Atomically lease jobs to workers. Heartbeats keep long jobs alive; expired
