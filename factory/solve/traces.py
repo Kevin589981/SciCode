@@ -254,9 +254,27 @@ def main() -> None:
     traces_path = args.out / "traces.jsonl"
     sft_path = args.out / "sft.jsonl"
 
+    # resume: seeds already present in an existing traces file are skipped,
+    # the file is appended to -- endpoint outages must not waste finished work
+    mode = "a" if traces_path.exists() else "w"
+    if mode == "a":
+        done_ids = set()
+        with traces_path.open(encoding="utf-8") as fp:
+            for ln in fp:
+                try:
+                    done_ids.add(json.loads(ln)["seed_id"])
+                except json.JSONDecodeError:
+                    pass
+        before = len(seed_files)
+        seed_files = [sf for sf in seed_files
+                      if json.loads(sf.read_text(encoding="utf-8"))["problem_id"]
+                      not in done_ids]
+        print(f"resume: {len(done_ids)} seeds already traced, "
+              f"{len(seed_files)}/{before} to go")
+
     n_rows = n_pass = 0
-    with traces_path.open("w", encoding="utf-8") as ft, \
-            sft_path.open("w", encoding="utf-8") as fs:
+    with traces_path.open(mode, encoding="utf-8") as ft, \
+            sft_path.open(mode, encoding="utf-8") as fs:
         for sf in seed_files:
             seed = json.loads(sf.read_text(encoding="utf-8"))
             print(f"solving {seed['problem_id']} ...")
