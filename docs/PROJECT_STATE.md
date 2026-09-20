@@ -128,8 +128,9 @@ Batch production v2 is implemented locally:
 - immutable default-branch commit pinning for admitted catalog entries;
 - per-query/per-repository discovery error ledgers so one deleted or transiently
   unavailable candidate does not discard an otherwise valid batch;
-- SQLite WAL job/resource leases, expiry recovery, heartbeats, retries, and
-  event audit;
+- SQLite transactional job/resource leases, expiry recovery, heartbeats,
+  retries, and event audit; portable rollback journaling is the default and WAL
+  is opt-in on compatible local filesystems;
 - queue-global LLM/repository slots plus a per-repository mutex;
 - fixed-schema repository screening, license gate, AST mining, and
   repository-intent × code-evidence ranking;
@@ -137,10 +138,13 @@ Batch production v2 is implemented locally:
 - isolated repository/job artifact shards and deterministic atomic aggregation;
 - split enqueue/worker/status/aggregate commands and a bounded `auto` command.
 
-Offline verification currently passes 47 tests plus 6 subtests. The remaining
-operational step is to commit/push v2, advance the `yicloud` checkout to the
-same commit, and run a small real GitHub discovery smoke before large-scale
-generation.
+Offline verification currently passes 48 tests plus 6 subtests. The v2 commits
+have been pushed and the `yicloud` checkout kept synchronized. A bounded live
+GitHub smoke resolved exact SHAs with no API errors; after the high-precision
+scope and documentation filters were applied, `CURENT/andes` was the leading
+candidate and the awesome-list result was recorded in the rejection ledger.
+Before training-scale generation, calibrate repository/trace judges on a human
+sample and choose endpoint-specific concurrency budgets.
 
 ## Smoke Endpoint
 

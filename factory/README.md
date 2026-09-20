@@ -201,8 +201,10 @@ python -m factory.reasoning.batch aggregate \
   --db .work/batch.sqlite3 --out .work/reasoning-batch/sft.jsonl
 ```
 
-The queue uses SQLite WAL, atomic job leases, job/resource heartbeats, bounded
-retries, and process-global resource slots. A repository snapshot plus the
+The queue uses SQLite transactions, atomic job leases, job/resource heartbeats,
+bounded retries, and process-global resource slots. The portable default is
+rollback (`DELETE`) journaling; `--sqlite-journal WAL` is opt-in for a proven
+local filesystem. A repository snapshot plus the
 canonical recipe hash defines job identity, so replaying the same enqueue is
 idempotent while a model/configuration change creates a new shard. Each
 repository writes only to
@@ -212,7 +214,9 @@ JSONL. Slot counts are immutable within a queue so independent workers cannot
 silently choose incompatible concurrency budgets.
 
 This SQLite implementation is deliberately single-host. Multiple processes on
-one machine are supported; a multi-node deployment should preserve the same
+one machine are supported. Some virtual/shared filesystems do not implement WAL
+shared-memory semantics; keep the portable default there or use `--db` to put a
+WAL queue on local storage. A multi-node deployment should preserve the same
 lease and idempotency protocol over a network database rather than place the
 SQLite file on an arbitrary shared filesystem.
 

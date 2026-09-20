@@ -279,6 +279,7 @@ def aggregate_sft(
     digest = hashlib.sha256(output_path.read_bytes()).hexdigest()
     report = {
         "schema_version": BATCH_SCHEMA,
+        "queue_db": str(queue.path.resolve()),
         "queue": states,
         "repositories": repositories,
         "sft_rows": len(rows_by_trace),
@@ -359,6 +360,11 @@ def main() -> None:
     enqueue_parser.add_argument("--max-attempts", type=int, default=3)
     enqueue_parser.add_argument("--llm-slots", type=int, default=3)
     enqueue_parser.add_argument("--repository-slots", type=int, default=2)
+    enqueue_parser.add_argument(
+        "--sqlite-journal",
+        choices=("DELETE", "TRUNCATE", "WAL"),
+        default="DELETE",
+    )
     _recipe_options(enqueue_parser)
 
     worker_parser = subparsers.add_parser("worker")
@@ -405,6 +411,12 @@ def main() -> None:
     auto_parser.add_argument("--llm-slots", type=int, default=3)
     auto_parser.add_argument("--repository-slots", type=int, default=2)
     auto_parser.add_argument("--max-attempts", type=int, default=3)
+    auto_parser.add_argument("--db", type=Path)
+    auto_parser.add_argument(
+        "--sqlite-journal",
+        choices=("DELETE", "TRUNCATE", "WAL"),
+        default="DELETE",
+    )
     _worker_options(auto_parser, include_roots=False)
     _recipe_options(auto_parser)
 
@@ -422,7 +434,7 @@ def main() -> None:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return
     if args.command == "enqueue":
-        queue = WorkQueue(args.db)
+        queue = WorkQueue(args.db, journal_mode=args.sqlite_journal)
         queue.configure_slots("llm", args.llm_slots)
         queue.configure_slots("repository", args.repository_slots)
         result = enqueue_catalog(
@@ -449,7 +461,10 @@ def main() -> None:
 
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    queue = WorkQueue(output_root / "batch.sqlite3")
+    queue = WorkQueue(
+        args.db or output_root / "batch.sqlite3",
+        journal_mode=args.sqlite_journal,
+    )
     queue.configure_slots("llm", args.llm_slots)
     queue.configure_slots("repository", args.repository_slots)
     keywords = load_keywords(args.keywords)

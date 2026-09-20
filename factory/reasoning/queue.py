@@ -1,10 +1,12 @@
 """SQLite-backed leases and global resource slots for batch production.
 
-The queue is intentionally local-machine infrastructure. SQLite WAL provides an
-atomic coordination point for multiple worker processes on one host, while each
-repository writes to its own artifact shard. A multi-node deployment should use
-the same lease protocol over a network database rather than place this SQLite
-file on an arbitrary network filesystem.
+The queue is intentionally local-machine infrastructure. SQLite transactions
+provide an atomic coordination point for multiple worker processes on one host,
+while each repository writes to its own artifact shard. The portable default is
+DELETE journaling; WAL is opt-in for a filesystem known to support its shared
+memory semantics. A multi-node deployment should use the same lease protocol
+over a network database rather than place this SQLite file on an arbitrary
+network filesystem.
 """
 
 from __future__ import annotations
@@ -106,10 +108,21 @@ def job_id_for(kind: str, key: str) -> str:
 class WorkQueue:
     """Small durable queue with atomic leases and process-global slot pools."""
 
-    def __init__(self, path: Path, *, busy_timeout: float = 30.0):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        busy_timeout: float = 30.0,
+        journal_mode: str | None = None,
+    ):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.busy_timeout = busy_timeout
+        if journal_mode is not None:
+            journal_mode = journal_mode.upper()
+            if journal_mode not in {"DELETE", "TRUNCATE", "WAL"}:
+                raise QueueError(f"unsupported SQLite journal mode: {journal_mode}")
+        self.requested_journal_mode = journal_mode
         self.initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -120,13 +133,39 @@ class WorkQueue:
         )
         connection.row_factory = sqlite3.Row
         connection.execute(f"PRAGMA busy_timeout={int(self.busy_timeout * 1000)}")
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=NORMAL")
         return connection
 
     def initialize(self) -> None:
-        with contextlib.closing(self._connect()) as connection:
-            connection.executescript(SCHEMA)
+        existed = self.path.exists() and self.path.stat().st_size > 0
+        try:
+            with contextlib.closing(self._connect()) as connection:
+                current = str(connection.execute("PRAGMA journal_mode").fetchone()[0])
+                requested = self.requested_journal_mode
+                if existed and requested and current.casefold() != requested.casefold():
+                    raise QueueError(
+                        f"queue already uses SQLite journal mode {current}, not "
+                        f"{requested}"
+                    )
+                if not existed:
+                    desired = requested or "DELETE"
+                    actual = str(
+                        connection.execute(f"PRAGMA journal_mode={desired}").fetchone()[
+                            0
+                        ]
+                    )
+                    if actual.casefold() != desired.casefold():
+                        raise QueueError(
+                            f"filesystem selected SQLite journal mode {actual}, not "
+                            f"{desired}"
+                        )
+                connection.executescript(SCHEMA)
+        except sqlite3.OperationalError as exc:
+            raise QueueError(
+                f"cannot initialize SQLite queue at {self.path}: {exc}. "
+                "Use DELETE journaling for a shared/virtual filesystem or place "
+                "a WAL queue on a proven local filesystem."
+            ) from exc
 
     @staticmethod
     def _event(

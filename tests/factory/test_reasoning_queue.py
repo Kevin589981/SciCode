@@ -1,4 +1,6 @@
 import concurrent.futures as futures
+import contextlib
+import sqlite3
 import tempfile
 import threading
 import time
@@ -9,6 +11,16 @@ from factory.reasoning.queue import QueueError, ScheduledChat, WorkQueue
 
 
 class ReasoningQueueTests(unittest.TestCase):
+    def test_portable_journal_default_and_immutable_explicit_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "jobs.sqlite3"
+            WorkQueue(path)
+            with contextlib.closing(sqlite3.connect(path)) as connection:
+                mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+            self.assertEqual(mode.casefold(), "delete")
+            with self.assertRaisesRegex(QueueError, "already uses"):
+                WorkQueue(path, journal_mode="WAL")
+
     def test_concurrent_claims_are_unique(self):
         with tempfile.TemporaryDirectory() as td:
             queue = WorkQueue(Path(td) / "jobs.sqlite3")

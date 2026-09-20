@@ -78,8 +78,11 @@ enter the durable queue. Sources:
   idempotent; changed models, prompts/config, or source snapshot create new work.
 - Shards never share append-only JSONL files. Temporary-file replacement makes
   per-stage outputs and the final aggregate crash-safe.
-- SQLite WAL is a single-host implementation. Multi-node operation requires a
-  real network database implementing the same leases and uniqueness rules.
+- SQLite is a single-host implementation. Portable rollback journaling is the
+  default because WAL shared-memory files fail on some virtual/shared mounts;
+  WAL is an explicit option for proven local storage. Multi-node operation
+  requires a real network database implementing the same leases and uniqueness
+  rules.
 
 ## Quality boundary
 
