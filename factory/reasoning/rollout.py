@@ -1,4 +1,5 @@
 """Collect native-thinking solver rollouts for reasoning tasks."""
+
 from __future__ import annotations
 
 import argparse
@@ -32,10 +33,10 @@ def solver_messages(task: dict) -> list[dict]:
     requirements = "\n".join(
         f"- {requirement}" for requirement in task["deliverable"]["requirements"]
     )
-    user = f"""{problem['question']}
+    user = f"""{problem["question"]}
 
 Scientific background:
-{problem['background']}
+{problem["background"]}
 
 Deliverables:
 {requirements}
@@ -49,7 +50,12 @@ in the response before presenting the final implementation or analysis.
     ]
 
 
-def trace_id_for(task: dict, model: str, attempt: int) -> str:
+def trace_id_for(
+    task: dict,
+    model: str,
+    attempt: int,
+    run_variant: str | None = None,
+) -> str:
     """Key resume by task content, solver identity, and requested attempt."""
     task = validate_task(task)
     identity = canonical_hash(
@@ -57,6 +63,7 @@ def trace_id_for(task: dict, model: str, attempt: int) -> str:
             "task_hash": canonical_hash(task),
             "model": model,
             "attempt": attempt,
+            "run_variant": run_variant or "default",
         }
     )[:16]
     readable = re.sub(r"[^A-Za-z0-9_-]+", "-", task["task_id"]).strip("-")[:80]
@@ -88,6 +95,7 @@ def collect_trace(
     timeout: int = 2400,
     factory_commit: str | None = None,
     task_set_hash: str = "unknown",
+    run_variant: str | None = None,
     outcome_fn: Callable[[dict, dict], dict] | None = None,
 ) -> dict:
     """Collect one trace; an auxiliary checker can never erase the raw response."""
@@ -105,7 +113,9 @@ def collect_trace(
     try:
         assistant = llm.assistant_message(response)
     except (KeyError, IndexError, TypeError) as exc:
-        raise RolloutError(f"solver response has no usable assistant message: {exc}") from exc
+        raise RolloutError(
+            f"solver response has no usable assistant message: {exc}"
+        ) from exc
     messages = [*messages, assistant]
     outcome = {"status": "not_run", "kind": "auxiliary_check"}
     if outcome_fn is not None:
@@ -122,7 +132,7 @@ def collect_trace(
             }
     trace = {
         "schema_version": TRACE_SCHEMA,
-        "trace_id": trace_id_for(task, model, attempt),
+        "trace_id": trace_id_for(task, model, attempt, run_variant),
         "task_id": task["task_id"],
         "task_hash": canonical_hash(task),
         "model": model,
@@ -138,6 +148,7 @@ def collect_trace(
             "factory_commit": factory_commit or current_commit(),
             "task_set_hash": task_set_hash,
             "source_commit": task["source"]["commit"],
+            "run_variant": run_variant or "default",
         },
     }
     try:
@@ -167,6 +178,9 @@ def run_rollouts(
     output_path: Path,
     *,
     preflight_path: Path | None = None,
+    verification_path: Path | None = None,
+    preflight_model: str | None = None,
+    verifier_model: str | None = None,
     chat_fn: Callable = llm.chat,
     model: str | None = None,
     attempts: int = 1,
@@ -175,6 +189,7 @@ def run_rollouts(
     timeout: int = 2400,
     concurrency: int = 1,
     factory_commit: str | None = None,
+    run_variant: str | None = None,
     outcome_fn: Callable[[dict, dict], dict] | None = None,
     errors_path: Path | None = None,
 ) -> dict:
@@ -183,14 +198,35 @@ def run_rollouts(
         raise RolloutError("attempts and concurrency must be positive")
     tasks = [validate_task(row) for row in _jsonl(Path(tasks_path))]
     model = model or llm.client_config()["model"]
-    admitted_hashes = None
+    admission_sets = []
     if preflight_path is not None:
         records = _jsonl(Path(preflight_path))
-        admitted_hashes = {
-            row.get("task_hash") for row in records if row.get("accepted") is True
-        }
+        if preflight_model is not None:
+            records = [
+                row
+                for row in records
+                if (row.get("critic") or {}).get("model") == preflight_model
+            ]
+        admission_sets.append(
+            {row.get("task_hash") for row in records if row.get("accepted") is True}
+        )
+    if verification_path is not None:
+        records = _jsonl(Path(verification_path))
+        if verifier_model is not None:
+            records = [
+                row
+                for row in records
+                if (row.get("verifier") or {}).get("model") == verifier_model
+            ]
+        admission_sets.append(
+            {row.get("task_hash") for row in records if row.get("accepted") is True}
+        )
+    admitted_hashes = None
+    if admission_sets:
+        admitted_hashes = set.intersection(*admission_sets)
     selected = [
-        task for task in tasks
+        task
+        for task in tasks
         if admitted_hashes is None or canonical_hash(task) in admitted_hashes
     ]
     task_set_hash = canonical_hash([canonical_hash(task) for task in selected])
@@ -203,7 +239,7 @@ def run_rollouts(
     skipped = 0
     for task in selected:
         for attempt in range(attempts):
-            trace_id = trace_id_for(task, model, attempt)
+            trace_id = trace_id_for(task, model, attempt, run_variant)
             if trace_id in done:
                 skipped += 1
             else:
@@ -228,6 +264,7 @@ def run_rollouts(
             timeout=timeout,
             factory_commit=factory_commit,
             task_set_hash=task_set_hash,
+            run_variant=run_variant,
             outcome_fn=outcome_fn,
         )
 
@@ -266,6 +303,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tasks", type=Path, required=True)
     parser.add_argument("--preflight", type=Path)
+    parser.add_argument("--verification", type=Path)
+    parser.add_argument("--preflight-model")
+    parser.add_argument("--verifier-model")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--model")
     parser.add_argument("--attempts", type=int, default=1)
@@ -273,21 +313,25 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument("--timeout", type=int, default=2400)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--run-variant")
     args = parser.parse_args()
     result = run_rollouts(
         args.tasks,
         args.out,
         preflight_path=args.preflight,
+        verification_path=args.verification,
+        preflight_model=args.preflight_model,
+        verifier_model=args.verifier_model,
         model=args.model,
         attempts=args.attempts,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         timeout=args.timeout,
         concurrency=args.concurrency,
+        run_variant=args.run_variant,
     )
     print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

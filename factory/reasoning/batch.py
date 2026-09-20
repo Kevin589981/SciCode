@@ -151,8 +151,12 @@ def process_lease(
                 profile_model=recipe.get("profile_model"),
                 author_model=recipe.get("author_model"),
                 critic_model=recipe.get("critic_model"),
+                verifier_model=recipe.get("verifier_model"),
                 solver_model=recipe.get("solver_model"),
                 judge_model=recipe.get("judge_model"),
+                additional_judge_models=tuple(
+                    recipe.get("additional_judge_models") or ()
+                ),
                 tasks_per_repo=int(recipe.get("tasks_per_repo", 3)),
                 max_mined_candidates=int(recipe.get("max_mined_candidates", 600)),
                 allow_unknown_license=bool(recipe.get("allow_unknown_license", False)),
@@ -166,7 +170,9 @@ def process_lease(
         "output_dir": str(output_dir),
         "report": str(output_dir / "repository_report.json"),
         "sft": report.get("sft"),
+        "candidate_sft": report.get("candidate_sft") or report.get("sft"),
         "sft_rows": report.get("sft_rows", 0),
+        "artifacts": report.get("artifacts") or {},
         "commit": report.get("commit"),
     }
 
@@ -249,6 +255,14 @@ def aggregate_sft(
     if unfinished and not allow_incomplete:
         raise BatchError(f"refusing to aggregate with {unfinished} unfinished jobs")
     rows_by_trace = {}
+    companion_specs = {
+        "tasks": "task_id",
+        "preflight": "preflight_id",
+        "verification": "verification_id",
+        "traces": "trace_id",
+        "grades": "grade_id",
+    }
+    companion_rows = {name: {} for name in companion_specs}
     repositories = {"complete": 0, "rejected": 0, "missing": 0}
     for item in queue.completed_results(JOB_KIND):
         result = item["result"]
@@ -269,6 +283,23 @@ def aggregate_sft(
             if previous is not None and previous != row:
                 raise BatchError(f"conflicting SFT rows for trace {trace_id}")
             rows_by_trace[trace_id] = row
+        for name, identity_field in companion_specs.items():
+            artifact_path = (result.get("artifacts") or {}).get(name)
+            if not artifact_path:
+                continue
+            artifact = Path(artifact_path)
+            if not artifact.exists():
+                raise BatchError(f"completed job artifact is missing: {artifact}")
+            for row in _jsonl(artifact):
+                identity = row.get(identity_field)
+                if not isinstance(identity, str):
+                    raise BatchError(
+                        f"{name} row in {artifact} has no {identity_field}"
+                    )
+                previous = companion_rows[name].get(identity)
+                if previous is not None and previous != row:
+                    raise BatchError(f"conflicting {name} rows for {identity}")
+                companion_rows[name][identity] = row
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(output_path.name + ".tmp")
@@ -276,6 +307,15 @@ def aggregate_sft(
         for trace_id in sorted(rows_by_trace):
             output.write(json.dumps(rows_by_trace[trace_id], ensure_ascii=False) + "\n")
     temporary.replace(output_path)
+    companion_artifacts = {}
+    for name, rows in companion_rows.items():
+        path = output_path.with_name(f"batch.{name}.jsonl")
+        temporary = path.with_name(path.name + ".tmp")
+        with temporary.open("w", encoding="utf-8") as output:
+            for identity in sorted(rows):
+                output.write(json.dumps(rows[identity], ensure_ascii=False) + "\n")
+        temporary.replace(path)
+        companion_artifacts[name] = {"path": str(path), "rows": len(rows)}
     digest = hashlib.sha256(output_path.read_bytes()).hexdigest()
     report = {
         "schema_version": BATCH_SCHEMA,
@@ -283,6 +323,8 @@ def aggregate_sft(
         "queue": states,
         "repositories": repositories,
         "sft_rows": len(rows_by_trace),
+        "quality_status": "candidate_unreleased",
+        "quality_inputs": companion_artifacts,
         "sft": str(output_path),
         "sha256": digest,
         "allow_incomplete": allow_incomplete,
@@ -312,8 +354,10 @@ def _recipe_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--profile-model")
     parser.add_argument("--author-model")
     parser.add_argument("--critic-model")
+    parser.add_argument("--verifier-model")
     parser.add_argument("--solver-model")
     parser.add_argument("--judge-model")
+    parser.add_argument("--additional-judge-model", action="append", default=[])
     parser.add_argument("--tasks-per-repo", type=int, default=3)
     parser.add_argument("--max-mined-candidates", type=int, default=600)
     parser.add_argument("--allow-unknown-license", action="store_true")
@@ -329,8 +373,10 @@ def recipe_from_args(args) -> dict:
         "profile_model": args.profile_model,
         "author_model": args.author_model,
         "critic_model": args.critic_model,
+        "verifier_model": args.verifier_model,
         "solver_model": args.solver_model,
         "judge_model": args.judge_model,
+        "additional_judge_models": args.additional_judge_model,
         "tasks_per_repo": args.tasks_per_repo,
         "max_mined_candidates": args.max_mined_candidates,
         "allow_unknown_license": args.allow_unknown_license,
@@ -520,7 +566,7 @@ def main() -> None:
         processor_factory=lambda worker: _processor(queue, args, worker),
         job_lease_seconds=args.job_lease_seconds,
     )
-    report = aggregate_sft(queue, output_root / "sft.jsonl")
+    report = aggregate_sft(queue, output_root / "candidate-sft.jsonl")
     print(
         json.dumps(
             {

@@ -1,0 +1,8 @@
+{
+  "schema_version": "scicode-quality-release-policy-v1",
+  "eligible_difficulty_bands": ["medium", "hard"],
+  "min_distinct_judges": 2,
+  "min_judge_trainable_fraction": 0.67,
+  "min_accepted_verifiers": 1,
+  "require_role_separation": true
+}

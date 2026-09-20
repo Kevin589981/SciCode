@@ -360,8 +360,10 @@ def process_repository(
     profile_model: str | None = None,
     author_model: str | None = None,
     critic_model: str | None = None,
+    verifier_model: str | None = None,
     solver_model: str | None = None,
     judge_model: str | None = None,
+    additional_judge_models: tuple[str, ...] = (),
     tasks_per_repo: int = 3,
     max_mined_candidates: int = 600,
     allow_unknown_license: bool = False,
@@ -497,8 +499,10 @@ def process_repository(
         chat_fn=chat_fn,
         author_model=author_model,
         critic_model=critic_model,
+        verifier_model=verifier_model,
         solver_model=solver_model,
         judge_model=judge_model,
+        additional_judge_models=additional_judge_models,
         limit=tasks_per_repo,
         max_tokens=max_tokens,
         timeout=timeout,
@@ -515,7 +519,19 @@ def process_repository(
         "selected": len(selected),
         "reasoning_manifest": str(reasoning_dir / "run_manifest.json"),
         "sft": str(reasoning_dir / "sft.jsonl"),
+        "candidate_sft": str(reasoning_dir / "sft.jsonl"),
         "sft_rows": manifest["artifacts"]["sft"]["rows"],
+        "artifacts": {
+            name: str(reasoning_dir / filename)
+            for name, filename in {
+                "tasks": "tasks.jsonl",
+                "preflight": "preflight.jsonl",
+                "verification": "verification.jsonl",
+                "traces": "traces.jsonl",
+                "grades": "grades.jsonl",
+                "candidate_sft": "sft.jsonl",
+            }.items()
+        },
     }
     _write_json(report_path, report)
     return report

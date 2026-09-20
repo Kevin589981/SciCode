@@ -105,6 +105,10 @@ class ReasoningPreflightTests(unittest.TestCase):
             self.assertEqual(len(calls), 1)
             self.assertEqual(row["task_hash"], canonical_hash(task))
 
+            third = run_preflight(tasks, out, chat_fn=fake_chat, model="critic-b")
+            self.assertEqual(third["accepted"], 1)
+            self.assertEqual(len(calls), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

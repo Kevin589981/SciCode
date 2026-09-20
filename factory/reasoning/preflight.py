@@ -4,6 +4,7 @@ Preflight asks whether a task demands meaningful scientific cognition. It does
 not run or score a candidate answer and deliberately has no pass/fail outcome
 input from a solver.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,6 +18,7 @@ from ..author import llm
 from .schema import SchemaError, canonical_hash, validate_task
 
 PREFLIGHT_SCHEMA = "scicode-reasoning-preflight-v1"
+PREFLIGHT_POLICY = "reasoning-depth-v2"
 CRITIC_SCORE_NAMES = (
     "scientific_depth",
     "multi_step_dependency",
@@ -41,8 +43,20 @@ class PreflightError(ValueError):
     """A task or critic response could not be evaluated."""
 
 
+def preflight_id_for(task: dict, model: str) -> str:
+    return canonical_hash(
+        {
+            "task_hash": canonical_hash(validate_task(task)),
+            "critic_model": model,
+            "policy": PREFLIGHT_POLICY,
+        }
+    )
+
+
 def _categories(text: str) -> set[str]:
-    return {name for name, pattern in OPERATION_PATTERNS.items() if pattern.search(text)}
+    return {
+        name for name, pattern in OPERATION_PATTERNS.items() if pattern.search(text)
+    }
 
 
 def structural_depth(task: dict) -> dict:
@@ -59,7 +73,10 @@ def structural_depth(task: dict) -> dict:
         reasons.append("fewer than three explicit cognitive categories")
     if len(question_reasoning) < 2:
         reasons.append("question exposes fewer than two reasoning categories")
-    if task["deliverable"]["kind"] != "analysis" and "implement" not in question_categories:
+    if (
+        task["deliverable"]["kind"] != "analysis"
+        and "implement" not in question_categories
+    ):
         reasons.append("implementation deliverable is not visible in the question")
     score = min(4, 1 + len(reasoning_categories))
     return {
@@ -173,6 +190,7 @@ def preflight_task(
 ) -> dict:
     """Combine deterministic structure and semantic depth into an admission record."""
     task = validate_task(task)
+    model = model or llm.client_config()["model"]
     structural = structural_depth(task)
     critic = critic_task(
         task,
@@ -191,9 +209,11 @@ def preflight_task(
     )
     return {
         "schema_version": PREFLIGHT_SCHEMA,
+        "preflight_id": preflight_id_for(task, model),
         "task_id": task["task_id"],
         "task_hash": canonical_hash(task),
         "accepted": structural["passed"] and semantic_pass,
+        "policy_version": PREFLIGHT_POLICY,
         "structural": structural,
         "critic": critic,
     }
@@ -234,19 +254,21 @@ def run_preflight(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     errors_path = errors_path or output_path.with_suffix(".errors.jsonl")
+    model = model or llm.client_config()["model"]
     existing = _jsonl(output_path) if output_path.exists() else []
-    done = {row.get("task_hash") for row in existing}
+    done = {row.get("preflight_id") for row in existing}
     counts = {"accepted": 0, "rejected": 0, "errors": 0, "skipped": 0}
     jobs = []
     for task in tasks:
         task_hash = canonical_hash(task)
-        if task_hash in done:
+        preflight_id = preflight_id_for(task, model)
+        if preflight_id in done:
             counts["skipped"] += 1
         else:
-            jobs.append((task, task_hash))
+            jobs.append((task, task_hash, preflight_id))
 
     def one(job):
-        task, _task_hash = job
+        task, _task_hash, _preflight_id = job
         return preflight_task(
             task,
             chat_fn=chat_fn,
@@ -261,7 +283,7 @@ def run_preflight(
     ) as errors, futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         pending = {pool.submit(one, job): job for job in jobs}
         for future in futures.as_completed(pending):
-            task, task_hash = pending[future]
+            task, task_hash, preflight_id = pending[future]
             try:
                 record = future.result()
             except (PreflightError, SchemaError, KeyError, TypeError) as exc:
@@ -270,6 +292,8 @@ def run_preflight(
                         {
                             "task_id": task.get("task_id"),
                             "task_hash": task_hash,
+                            "preflight_id": preflight_id,
+                            "critic_model": model,
                             "error": f"{type(exc).__name__}: {exc}"[:1000],
                         },
                         ensure_ascii=False,
@@ -281,7 +305,7 @@ def run_preflight(
                 continue
             output.write(json.dumps(record, ensure_ascii=False) + "\n")
             output.flush()
-            done.add(task_hash)
+            done.add(preflight_id)
             counts["accepted" if record["accepted"] else "rejected"] += 1
     return counts
 

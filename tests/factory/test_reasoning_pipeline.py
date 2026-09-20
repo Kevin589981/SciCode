@@ -50,6 +50,35 @@ def judge_response():
     }
 
 
+def verifier_response():
+    return {
+        "choices": [{"message": {"content": json.dumps({
+            "scores": {
+                "scientific_validity": 4,
+                "source_grounding": 4,
+                "answerability": 4,
+                "constraint_consistency": 4,
+                "shortcut_resistance": 3,
+            },
+            "fatal_issues": [],
+            "evidence": [
+                {
+                    "claim": "A scientific model is explicitly evaluated.",
+                    "source_quote": "Evaluate a stable scientific model.",
+                    "assessment": "supports",
+                },
+                {
+                    "claim": "The implementation uses a scaled bounded ratio.",
+                    "source_quote": "return x / (scale + abs(x))",
+                    "assessment": "supports",
+                },
+            ],
+            "rationale": "The task is grounded and internally consistent.",
+        })}}],
+        "usage": {"completion_tokens": 100},
+    }
+
+
 def solver_response():
     return {
         "choices": [{"message": {
@@ -170,6 +199,8 @@ class ReasoningPipelineTests(unittest.TestCase):
                     }
                 if "independent critic" in text:
                     return critic_response()
+                if "independent scientific task verifier" in text:
+                    return verifier_response()
                 if "TRAINING VALUE" in text:
                     return judge_response()
                 result = solver_response()
@@ -184,8 +215,10 @@ class ReasoningPipelineTests(unittest.TestCase):
                 chat_fn=fake_chat,
                 author_model="author",
                 critic_model="critic",
+                verifier_model="verifier",
                 solver_model="solver",
                 judge_model="judge",
+                additional_judge_models=("judge-2",),
                 limit=3,
                 concurrency=2,
                 factory_commit="commit123",
@@ -198,8 +231,10 @@ class ReasoningPipelineTests(unittest.TestCase):
                 chat_fn=fake_chat,
                 author_model="author",
                 critic_model="critic",
+                verifier_model="verifier",
                 solver_model="solver",
                 judge_model="judge",
+                additional_judge_models=("judge-2",),
                 limit=3,
                 concurrency=2,
                 factory_commit="commit123",
@@ -224,6 +259,8 @@ class ReasoningPipelineTests(unittest.TestCase):
             self.assertTrue(all(row["messages"][-1]["reasoning_content"] for row in sft))
             self.assertEqual(first["factory_commit"], "commit123")
             self.assertEqual(first["artifacts"]["sft"]["rows"], 3)
+            self.assertEqual(first["artifacts"]["grades"]["rows"], 6)
+            self.assertEqual(first["models"]["judges"], ["judge", "judge-2"])
             self.assertEqual(len(calls), call_count)
             self.assertEqual(second["stages"]["author"]["skipped"], 3)
 

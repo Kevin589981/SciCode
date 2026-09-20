@@ -1,4 +1,5 @@
 """One-command reasoning-task, rollout, grading, and SFT pipeline."""
+
 from __future__ import annotations
 
 import argparse
@@ -16,6 +17,7 @@ from .grade import run_grading
 from .preflight import run_preflight
 from .rollout import current_commit, run_rollouts
 from .schema import ARCHETYPES
+from .verify import run_verification
 
 RUN_SCHEMA = "scicode-reasoning-run-v1"
 
@@ -42,8 +44,10 @@ def run_pipeline(
     chat_fn: Callable = llm.chat,
     author_model: str | None = None,
     critic_model: str | None = None,
+    verifier_model: str | None = None,
     solver_model: str | None = None,
     judge_model: str | None = None,
+    additional_judge_models: tuple[str, ...] = (),
     limit: int = 3,
     attempts: int = 1,
     author_temperature: float = 0.3,
@@ -61,6 +65,7 @@ def run_pipeline(
     paths = {
         "tasks": output_dir / "tasks.jsonl",
         "preflight": output_dir / "preflight.jsonl",
+        "verification": output_dir / "verification.jsonl",
         "traces": output_dir / "traces.jsonl",
         "grades": output_dir / "grades.jsonl",
         "sft": output_dir / "sft.jsonl",
@@ -69,10 +74,11 @@ def run_pipeline(
     }
     factory_commit = factory_commit or current_commit()
     fallback_model = None
-    if not all((author_model, critic_model, solver_model, judge_model)):
+    if not all((author_model, critic_model, verifier_model, solver_model, judge_model)):
         fallback_model = llm.client_config()["model"]
     author_model = author_model or fallback_model
     critic_model = critic_model or fallback_model
+    verifier_model = verifier_model or fallback_model
     solver_model = solver_model or fallback_model
     judge_model = judge_model or fallback_model
     started = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -100,10 +106,22 @@ def run_pipeline(
         timeout=timeout,
         concurrency=concurrency,
     )
+    verification_result = run_verification(
+        paths["tasks"],
+        paths["verification"],
+        chat_fn=chat_fn,
+        model=verifier_model,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        concurrency=concurrency,
+    )
     rollout_result = run_rollouts(
         paths["tasks"],
         paths["traces"],
         preflight_path=paths["preflight"],
+        verification_path=paths["verification"],
+        preflight_model=critic_model,
+        verifier_model=verifier_model,
         chat_fn=chat_fn,
         model=solver_model,
         attempts=attempts,
@@ -113,16 +131,19 @@ def run_pipeline(
         concurrency=concurrency,
         factory_commit=factory_commit,
     )
-    grade_result = run_grading(
-        paths["tasks"],
-        paths["traces"],
-        paths["grades"],
-        chat_fn=chat_fn,
-        model=judge_model,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        concurrency=concurrency,
-    )
+    judge_models = list(dict.fromkeys((judge_model, *additional_judge_models)))
+    grade_result = {}
+    for active_judge in judge_models:
+        grade_result[active_judge] = run_grading(
+            paths["tasks"],
+            paths["traces"],
+            paths["grades"],
+            chat_fn=chat_fn,
+            model=active_judge,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            concurrency=concurrency,
+        )
     export_result = export_sft(
         paths["tasks"],
         paths["traces"],
@@ -132,7 +153,15 @@ def run_pipeline(
         judge_model=judge_model,
         inline_thinking=inline_thinking,
     )
-    artifact_names = ("tasks", "preflight", "traces", "grades", "sft", "sft_report")
+    artifact_names = (
+        "tasks",
+        "preflight",
+        "verification",
+        "traces",
+        "grades",
+        "sft",
+        "sft_report",
+    )
     manifest = {
         "schema_version": RUN_SCHEMA,
         "factory_commit": factory_commit,
@@ -142,8 +171,9 @@ def run_pipeline(
         "models": {
             "author": author_model,
             "critic": critic_model,
+            "verifier": verifier_model,
             "solver": solver_model,
-            "judge": judge_model,
+            "judges": judge_models,
         },
         "parameters": {
             "archetypes": list(ARCHETYPES),
@@ -164,6 +194,7 @@ def run_pipeline(
         "stages": {
             "author": author_result,
             "preflight": preflight_result,
+            "verification": verification_result,
             "rollout": rollout_result,
             "grade": grade_result,
             "export": export_result,
@@ -185,8 +216,10 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--author-model")
     parser.add_argument("--critic-model")
+    parser.add_argument("--verifier-model")
     parser.add_argument("--solver-model")
     parser.add_argument("--judge-model")
+    parser.add_argument("--additional-judge-model", action="append", default=[])
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--attempts", type=int, default=1)
     parser.add_argument("--author-temperature", type=float, default=0.3)
@@ -203,8 +236,10 @@ def main() -> None:
         args.out_dir,
         author_model=args.author_model,
         critic_model=args.critic_model,
+        verifier_model=args.verifier_model,
         solver_model=args.solver_model,
         judge_model=args.judge_model,
+        additional_judge_models=tuple(args.additional_judge_model),
         limit=args.limit,
         attempts=args.attempts,
         author_temperature=args.author_temperature,

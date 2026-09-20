@@ -139,13 +139,37 @@ Batch production v2 is implemented locally:
 - isolated repository/job artifact shards and deterministic atomic aggregation;
 - split enqueue/worker/status/aggregate commands and a bounded `auto` command.
 
-Offline verification currently passes 48 tests plus 6 subtests. The v2 commits
+Offline verification currently passes 60 tests plus 6 subtests. The v2 commits
 have been pushed and the `yicloud` checkout kept synchronized. A bounded live
 GitHub smoke resolved exact SHAs with no API errors; after the high-precision
 scope and documentation filters were applied, `CURENT/andes` was the leading
 candidate and the awesome-list result was recorded in the rejection ledger.
-Before training-scale generation, calibrate repository/trace judges on a human
-sample and choose endpoint-specific concurrency budgets.
+Quality/difficulty v3 is implemented locally:
+
+- critic-aware preflight IDs prevent reuse across different critic models;
+- independent task verification requires two exact quotes grounded in the
+  private source and scores validity, answerability, consistency, and shortcut
+  resistance;
+- rollout admission is the intersection of depth and source-verification gates;
+- trace IDs include the full sampling variant, so temperature/panel changes do
+  not silently reuse old generations;
+- multiple judge models can grade the same trace while the primary judge still
+  defines candidate-SFT masks;
+- named-solver panels report Wilson intervals and require multiple distinct
+  model IDs/trials; zero solve rate is `unresolved`, not `hard`;
+- deterministic stratified human-audit packets and calibration metrics cover
+  precision, recall, agreement, critical errors, scientific depth, and trace
+  value;
+- release SFT fails closed without population-matched human approval,
+  calibrated medium/hard difficulty, source verification, and multi-judge
+  consensus;
+- batch aggregation emits the tasks, preflights, verifications, traces, and
+  grades required to reproduce those gates rather than only a candidate SFT.
+
+The remaining operational work is to commit/synchronize v3, re-run the Kimi
+smoke through source verification, and prepare (not fabricate) the human review
+packet. Human labels and a genuinely distinct solver/judge panel are external
+evidence and must not be simulated with repeated Kimi aliases.
 
 ## Smoke Endpoint
 

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from factory.reasoning.rollout import collect_trace, run_rollouts
+from factory.reasoning.rollout import collect_trace, run_rollouts, trace_id_for
 from factory.reasoning.schema import canonical_hash, validate_trace
 from tests.factory_fixtures import task_for
 
@@ -26,6 +26,12 @@ def response():
 
 
 class ReasoningRolloutTests(unittest.TestCase):
+    def test_trace_identity_includes_sampling_variant(self):
+        task = task_for()
+        first = trace_id_for(task, "solver", 0, "temperature-0.2")
+        second = trace_id_for(task, "solver", 0, "temperature-0.8")
+        self.assertNotEqual(first, second)
+
     def test_collect_trace_preserves_native_reasoning_and_auxiliary_failure(self):
         task = task_for()
 

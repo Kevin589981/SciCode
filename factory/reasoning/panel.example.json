@@ -1,0 +1,22 @@
+{
+  "schema_version": "scicode-difficulty-panel-v1",
+  "solvers": [
+    {
+      "name": "solver-a",
+      "model": "replace-with-first-model-id",
+      "attempts": 2,
+      "temperature": 0.7
+    },
+    {
+      "name": "solver-b",
+      "model": "replace-with-second-model-id",
+      "attempts": 2,
+      "temperature": 0.7
+    }
+  ],
+  "evaluator_model": "replace-with-independent-evaluator-id",
+  "min_distinct_models": 2,
+  "min_trials": 4,
+  "evaluator_max_tokens": 4096,
+  "evaluator_timeout": 2400
+}

@@ -59,12 +59,18 @@ class ReasoningBatchTests(unittest.TestCase):
                     shard.mkdir(parents=True)
                     sft = shard / "sft.jsonl"
                     sft.write_text(json.dumps(sft_row(index)) + "\n", encoding="utf-8")
+                    tasks = shard / "tasks.jsonl"
+                    tasks.write_text(
+                        json.dumps({"task_id": f"task-{index}"}) + "\n",
+                        encoding="utf-8",
+                    )
                     with lock:
                         processed.append(lease.job_id)
                     return {
                         "status": "complete",
                         "sft": str(sft),
                         "sft_rows": 1,
+                        "artifacts": {"tasks": str(tasks)},
                     }
 
                 return process
@@ -76,6 +82,8 @@ class ReasoningBatchTests(unittest.TestCase):
             report = aggregate_sft(queue, output)
             rows = [json.loads(line) for line in output.read_text().splitlines()]
             self.assertEqual(report["sft_rows"], 12)
+            self.assertEqual(report["quality_status"], "candidate_unreleased")
+            self.assertEqual(report["quality_inputs"]["tasks"]["rows"], 12)
             self.assertEqual(
                 [row["trace_id"] for row in rows],
                 sorted(row["trace_id"] for row in rows),

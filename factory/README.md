@@ -113,8 +113,8 @@ The vertical pipeline is:
 
 ```
 mined source -> heterogeneous task authoring -> reasoning-depth preflight
-             -> native-thinking rollout -> outcome-independent trace grading
-             -> canonical thinking-aware SFT
+             -> exact-source scientific verification -> native-thinking rollout
+             -> multi-judge outcome-independent grading -> candidate SFT
 ```
 
 Run the complete pipeline with one source candidate per archetype:
@@ -128,6 +128,7 @@ python -m factory.reasoning.pipeline \
     --mined .work/scipy-mined.jsonl \
     --repo-meta .work/scipy-repo-meta.json \
     --out-dir data-reasoning-smoke \
+    --verifier-model Kimi-K3 \
     --limit 3 --attempts 1 --max-tokens 16384 \
     --timeout 2400 --concurrency 3
 ```
@@ -138,15 +139,75 @@ The primary files are:
 |---|---|
 | `tasks.jsonl` | validated task contracts and private source provenance |
 | `preflight.jsonl` | structural and semantic reasoning-depth admission |
+| `verification.jsonl` | source-grounded validity, answerability, and shortcut gate |
 | `traces.jsonl` | verbatim messages, including native `reasoning_content` |
 | `grades.jsonl` | scientific trace-value scores and per-message loss policy |
-| `sft.jsonl` | canonical training records with separate reasoning/content masks |
+| `sft.jsonl` | candidate training records with separate reasoning/content masks |
 | `run_manifest.json` | code, model, parameter, input, and artifact hashes |
 
 `sft.jsonl` selection is controlled by reasoning quality, not `reward == 1`.
 Executable outcomes may be attached to traces as auxiliary evidence. The
 canonical format keeps `reasoning_content` even when `--inline-thinking` is used;
 trainer-specific conversion must not silently discard it.
+
+### Difficulty calibration and quality release
+
+Candidate SFT is not release SFT. `factory.reasoning.difficulty` measures task
+difficulty with multiple named solver models and repeated attempts. A separate
+evaluator scores whether each response actually solved the task; this is kept
+separate from trace training-value grading. At least two distinct solver model
+IDs and four valid trials are required by the default panel. A zero solve rate
+is `unresolved`, not automatically `hard`; a one-model smoke is
+`uncalibrated`.
+
+```bash
+python -m factory.reasoning.difficulty \
+  --tasks .work/batch.tasks.jsonl \
+  --preflight .work/batch.preflight.jsonl \
+  --verification .work/batch.verification.jsonl \
+  --preflight-model CriticModel --verifier-model VerifierModel \
+  --panel factory/reasoning/panel.example.json \
+  --out-dir .work/difficulty --concurrency 2
+```
+
+`factory.reasoning.quality` creates a deterministic blind audit sample spanning
+archetype, difficulty, and automatic accept/reject strata. Model identities,
+outcomes, and automatic decisions are kept in a separate `.key.jsonl`; humans
+add reviews to each packet row's `human_reviews`. Calibration rejoins the key
+and measures task-validity rate,
+scientific depth, trace value, automatic-selection precision/recall, critical
+errors, and overlapping-reviewer agreement.
+
+```bash
+python -m factory.reasoning.quality audit \
+  --tasks .work/batch.tasks.jsonl --traces .work/batch.traces.jsonl \
+  --grades .work/batch.grades.jsonl \
+  --verifications .work/batch.verification.jsonl \
+  --difficulty .work/difficulty/difficulty.jsonl \
+  --out .work/human-audit.jsonl --sample-size 50
+
+# After reviewers fill human_reviews:
+python -m factory.reasoning.quality calibrate \
+  --packet .work/human-audit.jsonl \
+  --key .work/human-audit.jsonl.key.jsonl \
+  --out .work/calibration.json
+
+python -m factory.reasoning.quality release \
+  --tasks .work/batch.tasks.jsonl --traces .work/batch.traces.jsonl \
+  --candidate-sft .work/candidate-sft.jsonl \
+  --grades .work/batch.grades.jsonl \
+  --verifications .work/batch.verification.jsonl \
+  --difficulty .work/difficulty/difficulty.jsonl \
+  --calibration .work/calibration.json \
+  --policy factory/reasoning/release_policy.example.json \
+  --out .work/release-sft.jsonl
+```
+
+Release fails closed unless the human calibration belongs to the exact trace
+population and passes its thresholds. By default, each released row must also
+have a calibrated `medium`/`hard` band, an author-independent source verifier,
+and agreement from at least two solver-independent judge model IDs. Repeating
+the same model under different aliases does not count as independence.
 
 ### Batch repository factory
 
@@ -177,7 +238,8 @@ python -m factory.reasoning.batch auto \
   --query-limit 3 --repository-limit 10 \
   --workers 4 --repository-slots 2 --llm-slots 3 \
   --profile-model Kimi-K3 --author-model Kimi-K3 \
-  --critic-model Kimi-K3 --solver-model Kimi-K3 --judge-model Kimi-K3
+  --critic-model Kimi-K3 --verifier-model Kimi-K3 \
+  --solver-model Kimi-K3 --judge-model Kimi-K3
 ```
 
 For production, discovery/enqueue, workers, status, and aggregation can be run
@@ -191,14 +253,16 @@ python -m factory.reasoning.batch enqueue \
   --db .work/batch.sqlite3 --catalog .work/catalog.jsonl \
   --llm-slots 3 --repository-slots 2 \
   --profile-model Kimi-K3 --author-model Kimi-K3 \
-  --critic-model Kimi-K3 --solver-model Kimi-K3 --judge-model Kimi-K3
+  --critic-model Kimi-K3 --verifier-model Kimi-K3 \
+  --solver-model Kimi-K3 --judge-model Kimi-K3 \
+  --additional-judge-model SecondJudgeModel
 
 python -m factory.reasoning.batch worker \
   --db .work/batch.sqlite3 --cache-root .work/repository-cache \
   --output-root .work/reasoning-batch
 
 python -m factory.reasoning.batch aggregate \
-  --db .work/batch.sqlite3 --out .work/reasoning-batch/sft.jsonl
+  --db .work/batch.sqlite3 --out .work/reasoning-batch/candidate-sft.jsonl
 ```
 
 The queue uses SQLite transactions, atomic job leases, job/resource heartbeats,
@@ -233,10 +297,9 @@ Environment variables:
 
 ## Design notes / known limitations
 
-* **Difficulty is measured, not labeled** (ScienceIDE principle): seeds carry
-  no tier; run a named-solver panel over traces and record pass rates before
-  rating. `floor` in calibration tasks and per-seed solver pass rates are the
-  raw material for that.
+* **Difficulty is measured, not labeled** (ScienceIDE principle). The named
+  solver panel, Wilson interval, minimum panel coverage, and explicit
+  `unresolved`/`uncalibrated` states implement this rule.
 * `verify.py` currently authors **single sub-step** seeds; multi-substep
   decomposition (SciCode's 338-subproblem structure) is future work.
 * Novelty screen is lexical (Jaccard + names). Semantic near-duplicates of
@@ -245,10 +308,11 @@ Environment variables:
 * Demo: two hand-written proposals over scipy `inconsistent` / `vq` pass all
   gates (`seeds-demo/`); the LLM proposal stage only scales once an endpoint
   is configured.
-* The reasoning-first v1 judge is model-based and should be calibrated against
-  human-reviewed traces before producing a large training mixture. The initial
-  three-task Kimi run is a plumbing smoke test, not evidence of difficulty.
+* Model judges remain fallible. The release command therefore requires a human
+  calibration artifact tied to the exact trace population; a missing or failed
+  calibration cannot be bypassed by an ordinary release invocation.
 * Batch discovery uses a curated vocabulary plus optional model expansion. The
   current dual-evidence function ranker is lexical, intentionally cheap and
-  auditable; embedding retrieval and a calibrated scientific verifier remain
-  quality upgrades, not prerequisites for race-safe production.
+  auditable. Its output is subsequently checked by the source-grounded
+  scientific verifier; embedding retrieval remains a future recall/ranking
+  upgrade rather than an unrecorded quality assumption.
