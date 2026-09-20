@@ -121,8 +121,10 @@ def dotted_module(root: Path, py: Path) -> str:
     return ".".join(py.relative_to(root).with_suffix("").parts)
 
 
-def mine_repo(root: Path, max_per_module: int = 3, limit: int | None = None):
+def mine_repo(root: Path, max_per_module: int = 3, limit: int | None = None,
+              import_root: Path | None = None):
     root = Path(root)
+    hint_root = Path(import_root) if import_root else root
     out, per_module = [], {}
     for py in iter_py_files(root):
         rel = str(py.relative_to(root))
@@ -142,7 +144,7 @@ def mine_repo(root: Path, max_per_module: int = 3, limit: int | None = None):
                 continue
             cand = score_function(seg, rel)
             if cand:
-                cand["module_hint"] = dotted_module(root, py)
+                cand["module_hint"] = dotted_module(hint_root, py)
                 out.append(cand)
                 per_module[mod_key] = per_module.get(mod_key, 0) + 1
                 if limit and len(out) >= limit:
@@ -157,8 +159,12 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path(".work/mined.jsonl"))
     ap.add_argument("--max-per-module", type=int, default=3)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--import-root", type=Path, default=None,
+                    help="dir the dotted module names must be importable "
+                         "from (default: --repo)")
     args = ap.parse_args()
-    cands = mine_repo(args.repo, args.max_per_module, args.limit)
+    cands = mine_repo(args.repo, args.max_per_module, args.limit,
+                      args.import_root)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8") as fp:
         for c in cands:

@@ -111,20 +111,30 @@ def main() -> None:
 
     ok, bad = 0, 0
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("w", encoding="utf-8") as fp:
-        for cand in cands:
-            try:
-                prop = build_proposal(cand, repo_meta, args.temperature)
-            except Exception as e:
-                print(f"  LLM error on {cand['file']}:{cand['function']}: {e}")
-                prop = None
+    import concurrent.futures as cf
+
+    def _one(cand):
+        try:
+            return build_proposal(cand, repo_meta, args.temperature)
+        except Exception as e:
+            print(f"  LLM error on {cand['file']}:{cand['function']}: {e}")
+            return None
+
+    with args.out.open("w", encoding="utf-8") as fp, \
+            cf.ThreadPoolExecutor(max_workers=8) as pool:
+        futs = {pool.submit(_one, c): c for c in cands}
+        done = 0
+        for fut in cf.as_completed(futs):
+            cand = futs[fut]
+            prop = fut.result()
+            done += 1
             if prop:
                 fp.write(json.dumps(prop) + "\n")
                 ok += 1
             else:
                 bad += 1
-            print(f"[{ok + bad}/{len(cands)}] ok={ok} bad={bad} "
-                  f"({cand['file']}:{cand['function']})")
+            if done % 10 == 0 or done == len(cands):
+                print(f"[{done}/{len(cands)}] ok={ok} bad={bad}", flush=True)
     print(f"\nproposals: {ok} ok / {bad} rejected -> {args.out}")
 
 
