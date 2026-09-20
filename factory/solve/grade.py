@@ -141,6 +141,7 @@ def main() -> None:
         seed = json.loads(sf.read_text(encoding="utf-8"))
         questions[seed["problem_id"]] = seed["problem_description_main"]
 
+    args.out.mkdir(parents=True, exist_ok=True)
     grades_path = args.out / "grades.jsonl"
     grades: dict[tuple, dict] = {}
     if grades_path.exists():
