@@ -194,7 +194,8 @@ def feedback_message(verifier: dict, turn: int) -> str:
 
 
 def solve_seed(seed: dict, h5: Path, attempts: int, max_turns: int,
-               temperature: float, max_tokens: int = 4096) -> list[dict]:
+               temperature: float, max_tokens: int = 4096,
+               timeout: int = 900) -> list[dict]:
     """Multi-step episode (SciCode-style chain): walk sub_steps in order,
     the student's own code accumulating; a step that never passes breaks the
     chain (later steps are not attempted, scoring 0 -- the official cascade).
@@ -218,7 +219,7 @@ def solve_seed(seed: dict, h5: Path, attempts: int, max_turns: int,
             for turn in range(1, max_turns + 1):
                 total_turns += 1
                 resp = llm.chat(messages, temperature=temperature,
-                                max_tokens=max_tokens)
+                                max_tokens=max_tokens, timeout=timeout)
                 usage = llm.usage_of(resp)
                 amsg = llm.assistant_message(resp)
                 messages.append(amsg)
@@ -292,6 +293,8 @@ def main() -> None:
     ap.add_argument("--max-tokens", type=int, default=4096,
                     help="per-response token budget; thinking models need "
                          "8k-16k (the model may spend it all on reasoning)")
+    ap.add_argument("--timeout", type=int, default=900,
+                    help="per-request seconds for the solver endpoint")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--sft-all", action="store_true",
                     help="include failed episodes in sft.jsonl (default: "
@@ -333,7 +336,8 @@ def main() -> None:
             print(f"solving {seed['problem_id']} ...")
             try:
                 rows = solve_seed(seed, h5, args.attempts, args.max_turns,
-                                  args.temperature, max_tokens=args.max_tokens)
+                                  args.temperature, max_tokens=args.max_tokens,
+                                  timeout=args.timeout)
             except Exception as e:
                 print(f"  solver error: {e}")
                 continue

@@ -92,7 +92,7 @@ def _parse_json(text: str):
 
 def build_group_proposal(group: dict, repo_meta: dict,
                          temperature: float,
-                         max_tokens: int = 4096) -> dict | None:
+                         max_tokens: int = 4096, timeout: int = 900) -> dict | None:
     root, dep = group["root"], group["dep"]
     prompt = GROUP_PROMPT.format(
         repo_url=repo_meta.get("url", "?"), commit=repo_meta.get("commit", "?"),
@@ -101,7 +101,8 @@ def build_group_proposal(group: dict, repo_meta: dict,
         root_source=root["source"], root_file=root["file"],
         dep_fn=dep["function"], root_fn=root["function"])
     resp = llm.chat([{"role": "user", "content": prompt}],
-                    temperature=temperature, max_tokens=max_tokens)
+                    temperature=temperature, max_tokens=max_tokens,
+                    timeout=timeout)
     content = resp["choices"][0]["message"].get("content") or ""
     if not content.strip():
         raise ValueError("empty model response (thinking budget exhausted? "
@@ -150,13 +151,14 @@ def build_group_proposal(group: dict, repo_meta: dict,
 
 
 def build_proposal(cand: dict, repo_meta: dict, temperature: float,
-                   max_tokens: int = 4096) -> dict | None:
+                   max_tokens: int = 4096, timeout: int = 900) -> dict | None:
     prompt = PROMPT.format(
         repo_url=repo_meta.get("url", "?"), commit=repo_meta.get("commit", "?"),
         license=repo_meta.get("license", "?"), file=cand["file"],
         source=cand["source"])
     resp = llm.chat([{"role": "user", "content": prompt}],
-                    temperature=temperature, max_tokens=max_tokens)
+                    temperature=temperature, max_tokens=max_tokens,
+                    timeout=timeout)
     text = resp["choices"][0]["message"].get("content") or ""
     # tolerate ```json fences
     text = text.strip()
@@ -201,6 +203,10 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--max-tokens", type=int, default=4096)
+    ap.add_argument("--timeout", type=int, default=900,
+                    help="per-request seconds; 16k thinking responses need "
+                         "long budgets under concurrency")
+    ap.add_argument("--workers", type=int, default=8)
     args = ap.parse_args()
 
     repo_meta = json.loads(args.repo_meta.read_text(encoding="utf-8"))
@@ -216,16 +222,16 @@ def main() -> None:
         try:
             if "root" in cand and "dep" in cand:  # call-chain group
                 return build_group_proposal(cand, repo_meta, args.temperature,
-                                            args.max_tokens)
+                                            args.max_tokens, args.timeout)
             return build_proposal(cand, repo_meta, args.temperature,
-                                  args.max_tokens)
+                                  args.max_tokens, args.timeout)
         except Exception as e:
             label = f"{cand.get('file', '?')}:{cand.get('function', '?')}"
             print(f"  LLM error on {label}: {e}")
             return None
 
     with args.out.open("w", encoding="utf-8") as fp, \
-            cf.ThreadPoolExecutor(max_workers=8) as pool:
+            cf.ThreadPoolExecutor(max_workers=args.workers) as pool:
         futs = {pool.submit(_one, c): c for c in cands}
         done = 0
         for fut in cf.as_completed(futs):

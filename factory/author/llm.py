@@ -24,7 +24,7 @@ def client_config() -> dict:
 
 def chat(messages: list[dict], *, model: str | None = None,
          temperature: float = 0.0, max_tokens: int = 4096,
-         retries: int = 3, timeout: int = 300) -> dict:
+         retries: int = 3, timeout: int = 900) -> dict:
     """Return the raw response JSON from a chat.completions call."""
     cfg = client_config()
     url = cfg["base_url"] + "/chat/completions"
