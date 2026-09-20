@@ -148,12 +148,40 @@ def run_original(prop: dict, repo_root: Path, timeout: int = SEED_CALL_TIMEOUT +
         return pickle.loads(out_pkl.read_bytes()), wall
 
 
-def make_test_cases(prop: dict) -> list[str]:
+def _hetero_tuple(outputs) -> bool:
+    """tuple outputs whose elements have DIFFERENT shapes cannot go through
+    np.allclose (np.asarray dies on ragged sequences) -- the official
+    benchmark uses scicode.compare.cmp.cmp_tuple_or_list for those."""
+    if not (outputs and isinstance(outputs[0], (tuple, list))):
+        return False
+    shapes = []
+    for o in outputs[0]:
+        try:
+            shapes.append(np.asarray(o).shape)
+        except Exception:
+            return True
+    return len(set(shapes)) > 1 or any(
+        (isinstance(o, (tuple, list))
+         and not all(isinstance(x, (tuple, list)) for x in o))
+        for o in outputs)
+
+
+def _case_lines(function: str, exprs: list[str],
+                hetero: bool) -> list[str]:
     cases = []
-    for expr in prop["test_inputs"]:
-        call = f"{prop['function']}{expr}"
-        cases.append(f"assert np.allclose({call}, target, atol=1e-8, rtol=1e-6)")
+    for expr in exprs:
+        call = f"{function}{expr}"
+        if hetero:
+            cases.append("from scicode.compare.cmp import cmp_tuple_or_list")
+            cases.append(f"assert cmp_tuple_or_list({call}, target)")
+        else:
+            cases.append(
+                f"assert np.allclose({call}, target, atol=1e-8, rtol=1e-6)")
     return cases
+
+
+def make_test_cases(prop: dict) -> list[str]:
+    return _case_lines(prop["function"], prop["test_inputs"], hetero=False)
 
 
 def _write_targets(h5_path: Path, step_number: str, outputs: list) -> None:
@@ -199,11 +227,8 @@ def verify_chain(prop: dict, repo_root: Path, h5_path: Path,
         for j, (st, o1) in enumerate(zip(prop["sub_steps"], step_outputs)):
             step_number = f"{prop['slug']}-{j + 1}"
             _write_targets(h5_path, step_number, o1)
-            cases = []
-            for expr in st["test_inputs"]:
-                call = f"{st['function']}{expr}"
-                cases.append(
-                    f"assert np.allclose({call}, target, atol=1e-8, rtol=1e-6)")
+            hetero = _hetero_tuple([o1[0] if o1 else None])
+            cases = _case_lines(st["function"], st["test_inputs"], hetero)
             seed_steps.append({
                 "step_number": step_number,
                 "step_description_prompt": st["step_description_prompt"],
@@ -291,7 +316,9 @@ def verify_proposal(prop: dict, repo_root: Path, h5_path: Path,
                 "step_background": prop.get("background", ""),
                 "ground_truth_code": prop["reference_source"],
                 "function_header": prop["function_header"],
-                "test_cases": make_test_cases(prop),
+                "test_cases": _case_lines(
+                prop["function"], prop["test_inputs"],
+                _hetero_tuple(outputs1)),
                 "return_line": "",
             }],
             "general_solution": prop["reference_source"],
