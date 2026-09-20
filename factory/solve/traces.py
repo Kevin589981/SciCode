@@ -162,6 +162,10 @@ def main() -> None:
     ap.add_argument("--max-turns", type=int, default=3)
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--sft-all", action="store_true",
+                    help="include failed episodes in sft.jsonl (default: "
+                         "verified reward=1 only -- failed traces stay in "
+                         "traces.jsonl for analysis but are not trained on)")
     args = ap.parse_args()
 
     seed_files = sorted(args.seeds.glob("*.json"))
@@ -186,7 +190,8 @@ def main() -> None:
                 continue
             for r in rows:
                 ft.write(json.dumps(r) + "\n")
-                fs.write(json.dumps(to_sft_row(r)) + "\n")
+                if r["reward"] == 1 or args.sft_all:
+                    fs.write(json.dumps(to_sft_row(r)) + "\n")
                 n_rows += 1
                 n_pass += r["reward"] == 1
             print(f"  rewards: {[r['reward'] for r in rows]}")
