@@ -41,16 +41,30 @@ SYSTEM = ("You are an expert computational scientist. Solve the coding task. "
           "explanations outside the block.")
 
 
-def build_prompt(seed: dict) -> str:
-    s = seed["sub_steps"][0]
-    parts = [seed["problem_description_main"].strip(), ""]
-    if seed.get("problem_background_main"):
-        parts += ["Background:", seed["problem_background_main"].strip(), ""]
+def build_step_prompt(seed: dict, step_idx: int,
+                      prev_codes: list[str]) -> str:
+    """SciCode-style multi-step prompt: step question + header + the
+    student's OWN previous-step code as context (never the reference)."""
+    s = seed["sub_steps"][step_idx]
+    parts = []
+    if step_idx == 0 and seed.get("problem_description_main"):
+        parts += [seed["problem_description_main"].strip(), ""]
+        if seed.get("problem_background_main"):
+            parts += ["Background:", seed["problem_background_main"].strip(),
+                      ""]
+    parts += [f"Sub-step {step_idx + 1}/{len(seed['sub_steps'])}:",
+              s["step_description_prompt"].strip(), ""]
+    if s.get("step_background"):
+        parts += ["Background:", s["step_background"].strip(), ""]
     parts += ["Function signature and docstring:", "```python",
               s["function_header"].strip(), "```", "",
               "The following imports are already available: "
-              + seed["required_dependencies"].replace("\n", ", "), "",
-              "Implement the function body. Respond with one ```python block."]
+              + seed["required_dependencies"].replace("\n", ", ")]
+    if prev_codes:
+        parts += ["", "Code you have already written for the previous "
+                      "sub-steps (available in scope):", "```python",
+                  "\n\n".join(prev_codes), "```"]
+    parts += ["", "Implement this sub-step. Respond with one ```python block."]
     return "\n".join(parts)
 
 
@@ -102,9 +116,14 @@ def _diagnostic_test(i: int, n: int, case: str) -> list[str] | None:
     ]
 
 
-def run_verifier(seed: dict, code: str, h5: Path, timeout: int = 300) -> dict:
-    s = seed["sub_steps"][0]
+def run_verifier(seed: dict, code_steps: list[str], h5: Path,
+                 step_idx: int = 0, timeout: int = 300) -> dict:
+    """Judge step `step_idx` with the CUMULATIVE student code (its own
+    earlier steps + this one) -- mirrors the official SciCode cascade where
+    a broken earlier step dooms later ones."""
+    s = seed["sub_steps"][step_idx]
     n = len(s["test_cases"])
+    code = "\n\n".join(code_steps)
     lines = [seed["required_dependencies"], "", code, "",
              "from scicode.parse.parse import process_hdf5_to_tuple",
              f"targets = process_hdf5_to_tuple({s['step_number']!r}, {n}, {str(h5)!r})",
@@ -175,39 +194,70 @@ def feedback_message(verifier: dict, turn: int) -> str:
 
 
 def solve_seed(seed: dict, h5: Path, attempts: int, max_turns: int,
-               temperature: float) -> list[dict]:
-    prompt = build_prompt(seed)
+               temperature: float, max_tokens: int = 4096) -> list[dict]:
+    """Multi-step episode (SciCode-style chain): walk sub_steps in order,
+    the student's own code accumulating; a step that never passes breaks the
+    chain (later steps are not attempted, scoring 0 -- the official cascade).
+    reward = mean over ALL steps of per-step scores (1 only if everything
+    passed)."""
+    steps = seed["sub_steps"]
     rows = []
     for attempt in range(attempts):
         t_start = time.monotonic()
-        messages = [{"role": "system", "content": SYSTEM},
-                    {"role": "user", "content": prompt}]
-        verifier_log, usage, reward = [], {}, 0
-        turns = 0
-        for turn in range(1, max_turns + 1):
-            turns = turn
-            resp = llm.chat(messages, temperature=temperature)
-            usage = llm.usage_of(resp)
-            amsg = llm.assistant_message(resp)
-            messages.append(amsg)
-            code = extract_code(amsg.get("content", ""))
-            if code is None:
-                v = {"status": "no_code", "exit": None, "wall_sec": 0.0,
-                     "stderr_tail": "no python fence in response"}
-            else:
-                v = run_verifier(seed, code, h5)
-            verifier_log.append({"turn": turn, **v})
-            if v["status"] in ("pass", "fail"):
-                reward = (v.get("n_passed") or 0) / max(v.get("n_total") or 1, 1)
-            if v["status"] == "pass":
-                reward = 1
-                break
+        messages = [{"role": "system", "content": SYSTEM}]
+        verifier_log, usage = [], {}
+        student_codes: list[str] = []
+        step_scores: list[float] = []
+        total_turns = 0
+        chain_broken = False
+        for k, _s in enumerate(steps):
             messages.append({"role": "user",
-                             "content": feedback_message(v, turn)})
+                             "content": build_step_prompt(seed, k,
+                                                          student_codes)})
+            passed_k = False
+            for turn in range(1, max_turns + 1):
+                total_turns += 1
+                resp = llm.chat(messages, temperature=temperature,
+                                max_tokens=max_tokens)
+                usage = llm.usage_of(resp)
+                amsg = llm.assistant_message(resp)
+                messages.append(amsg)
+                code = extract_code(amsg.get("content", ""))
+                if code is None:
+                    v = {"status": "no_code", "exit": None, "wall_sec": 0.0,
+                         "n_passed": 0, "n_total": len(steps[k]["test_cases"]),
+                         "diagnostics": "", "stderr_tail": "no python fence"}
+                else:
+                    v = run_verifier(seed, student_codes + [code], h5,
+                                     step_idx=k)
+                verifier_log.append({"step": k + 1, "turn": turn, **v})
+                if v["status"] == "pass":
+                    student_codes.append(code)
+                    step_scores.append(1.0)
+                    passed_k = True
+                    break
+                score = ((v.get("n_passed") or 0)
+                         / max(v.get("n_total") or 1, 1))
+                messages.append({"role": "user",
+                                 "content": feedback_message(
+                                     {**v, "n_passed": v.get("n_passed"),
+                                      "n_total": v.get("n_total")},
+                                     turn)})
+                if turn == max_turns:
+                    step_scores.append(score)  # best partial on final try
+            if not passed_k:
+                chain_broken = True
+                step_scores.extend([0.0] * (len(steps) - k - 1))
+                break
+        reward = (sum(step_scores) / len(steps)) if steps else 0.0
+        if not chain_broken and step_scores and all(s == 1.0 for s in step_scores):
+            reward = 1.0
         rows.append({
             "seed_id": seed["problem_id"], "attempt": attempt,
             "model": llm.client_config()["model"], "temperature": temperature,
-            "turns": turns, "reward": reward,
+            "turns": total_turns, "reward": reward,
+            "n_steps": len(steps),
+            "step_scores": [round(s, 4) for s in step_scores],
             "messages": messages, "verifier": verifier_log,
             "usage": usage,
             "timing_sec": round(time.monotonic() - t_start, 2),
@@ -239,6 +289,9 @@ def main() -> None:
     ap.add_argument("--attempts", type=int, default=4)
     ap.add_argument("--max-turns", type=int, default=3)
     ap.add_argument("--temperature", type=float, default=0.7)
+    ap.add_argument("--max-tokens", type=int, default=4096,
+                    help="per-response token budget; thinking models need "
+                         "8k-16k (the model may spend it all on reasoning)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--sft-all", action="store_true",
                     help="include failed episodes in sft.jsonl (default: "
@@ -280,7 +333,7 @@ def main() -> None:
             print(f"solving {seed['problem_id']} ...")
             try:
                 rows = solve_seed(seed, h5, args.attempts, args.max_turns,
-                                  args.temperature)
+                                  args.temperature, max_tokens=args.max_tokens)
             except Exception as e:
                 print(f"  solver error: {e}")
                 continue

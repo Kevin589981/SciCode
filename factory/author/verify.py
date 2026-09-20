@@ -156,12 +156,100 @@ def make_test_cases(prop: dict) -> list[str]:
     return cases
 
 
+def _write_targets(h5_path: Path, step_number: str, outputs: list) -> None:
+    import h5py
+    with h5py.File(h5_path, "a") as h5:
+        if step_number in h5:
+            del h5[step_number]
+        grp = h5.create_group(step_number)
+        for i, o in enumerate(outputs):
+            tg = grp.create_group(f"test{i + 1}")
+            for j, v in enumerate(flatten_vars(o)):
+                tg.create_dataset(f"var{j + 1}", data=to_hdf5_value(v))
+
+
+def verify_chain(prop: dict, repo_root: Path, h5_path: Path,
+                 official_fingerprints) -> dict:
+    """Multi-sub-step chain: every step is executed against the ORIGINAL
+    upstream functions (step k's original internally calls the original
+    dependencies), so ground truth stays computable end to end."""
+    out = {"slug": prop["slug"], "status": None}
+    try:
+        step_outputs = []
+        for j, st in enumerate(prop["sub_steps"]):
+            if BANNED_EXPR.search(" ".join(st["test_inputs"])):
+                raise ValueError(f"step {j + 1}: banned tokens in test_inputs")
+            pl = {"module_hint": st.get("module_hint") or prop["module_hint"],
+                  "function": st["function"],
+                  "test_inputs": st["test_inputs"]}
+            o1, wall = run_original(pl, repo_root)
+            if not check_numeric(o1):
+                raise ValueError(f"step {j + 1}: outputs not numeric-comparable")
+            o2, _ = run_original(pl, repo_root)
+            if not all(compare(a, b) for a, b in zip(o1, o2)):
+                raise ValueError(f"step {j + 1}: non-deterministic outputs")
+            if wall > SEED_CALL_TIMEOUT:
+                raise ValueError(f"step {j + 1}: too slow ({wall:.1f}s)")
+            step_outputs.append(o1)
+
+        if not novelty.screen(prop, official_fingerprints):
+            raise ValueError("near-duplicate of official SciCode content")
+
+        seed_steps = []
+        for j, (st, o1) in enumerate(zip(prop["sub_steps"], step_outputs)):
+            step_number = f"{prop['slug']}-{j + 1}"
+            _write_targets(h5_path, step_number, o1)
+            cases = []
+            for expr in st["test_inputs"]:
+                call = f"{st['function']}{expr}"
+                cases.append(
+                    f"assert np.allclose({call}, target, atol=1e-8, rtol=1e-6)")
+            seed_steps.append({
+                "step_number": step_number,
+                "step_description_prompt": st["step_description_prompt"],
+                "step_background": st.get("step_background", ""),
+                "ground_truth_code": st["ground_truth_code"],
+                "function_header": st["function_header"],
+                "test_cases": cases,
+                "return_line": "",
+            })
+
+        all_deps = []
+        for st in prop["sub_steps"]:
+            all_deps.extend(st.get("dependencies") or [])
+        deps = list(dict.fromkeys([*all_deps, "import numpy as np"]))
+        seed = {
+            "problem_name": prop["slug"],
+            "problem_id": prop["slug"],
+            "problem_description_main": prop["question"],
+            "problem_background_main": prop.get("background", ""),
+            "required_dependencies": "\n".join(deps),
+            "sub_steps": seed_steps,
+            "general_solution": "\n\n".join(
+                st["ground_truth_code"] for st in prop["sub_steps"]),
+            "provenance": {
+                "repo": prop["repo"], "file": prop["file"],
+                "function": prop["function"],
+                "module_hint": prop["module_hint"],
+                "chain": True,
+                "generator": "scicode-factory author (chain, LLM propose, "
+                             "execution validate)",
+            },
+        }
+        out.update(status="survivor", seed=seed, wall_sec=None)
+    except Exception as e:
+        out.update(status="rejected", reason=str(e)[:300])
+    return out
+
+
 # ---------------------------------------------------------------------------
 # main verify loop
 # ---------------------------------------------------------------------------
 
 def verify_proposal(prop: dict, repo_root: Path, h5_path: Path,
                     official_fingerprints) -> dict:
+    if prop.get("chain"):
+        return verify_chain(prop, repo_root, h5_path, official_fingerprints)
     out = {"slug": prop["slug"], "status": None}
     try:
         if BANNED_EXPR.search(" ".join(prop["test_inputs"])):

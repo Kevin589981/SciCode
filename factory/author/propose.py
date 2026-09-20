@@ -45,6 +45,34 @@ Rules:
 Respond with ONLY a JSON object:
 {{"question": "...", "background": "...", "test_inputs": ["(...)", "...", "..."], "dependencies": ["import numpy as np"]}}"""
 
+GROUP_PROMPT = """You are authoring a TWO-STEP chain of a scientific research coding benchmark in the style of SciCode's sub-steps.
+
+Upstream repository (pinned): {repo_url} @ {commit} (license {license})
+
+Step-1 function (called by step 2) -- GROUND TRUTH from upstream:
+```python
+{dep_source}
+```
+Location: {dep_file}
+
+Step-2 function (calls the step-1 function) -- GROUND TRUTH from upstream:
+```python
+{root_source}
+```
+Location: {root_file}
+
+Author a two-step chain where the solver first implements `{dep_fn}`, then implements `{root_fn}` ON TOP OF ITS OWN step-1 code (exactly like the real code does).
+
+Rules:
+- Each step's question must be fully self-contained (task, inputs, outputs, formulas, and EVERY numeric convention/constant value -- never reference "constants defined in the library"). Do NOT mention the upstream repository or that reference code exists.
+- steps[0].test_inputs: 3 literal expressions evaluating to argument tuples for `{dep_fn}`.
+- steps[1].test_inputs: 3 literal expressions evaluating to argument tuples for `{root_fn}` (valid standalone; when the student's step-1 is also present the whole chain must run).
+- Keep inputs small, deterministic, typical + edge regime. numpy (np), scipy (sp), math, cmath only.
+- Do not invent behavior the sources do not have.
+
+Respond with ONLY a JSON object:
+{{"question": "overall one-sentence problem statement", "background": "...", "steps": [{{"function": "{dep_fn}", "question": "...", "background": "...", "test_inputs": ["(...)", "...", "..."]}}, {{"function": "{root_fn}", "question": "...", "background": "...", "test_inputs": ["(...)", "...", "..."]}}], "dependencies": ["import numpy as np"]}}"""
+
 
 def _signature_of(source: str) -> str:
     tree = ast.parse(source)
@@ -53,12 +81,82 @@ def _signature_of(source: str) -> str:
     return seg.split(":", 1)[0] + ":"
 
 
-def build_proposal(cand: dict, repo_meta: dict, temperature: float) -> dict | None:
+def _parse_json(text: str):
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text)
+
+
+def build_group_proposal(group: dict, repo_meta: dict,
+                         temperature: float,
+                         max_tokens: int = 4096) -> dict | None:
+    root, dep = group["root"], group["dep"]
+    prompt = GROUP_PROMPT.format(
+        repo_url=repo_meta.get("url", "?"), commit=repo_meta.get("commit", "?"),
+        license=repo_meta.get("license", "?"),
+        dep_source=dep["source"], dep_file=dep["file"],
+        root_source=root["source"], root_file=root["file"],
+        dep_fn=dep["function"], root_fn=root["function"])
+    resp = llm.chat([{"role": "user", "content": prompt}],
+                    temperature=temperature, max_tokens=max_tokens)
+    content = resp["choices"][0]["message"].get("content") or ""
+    if not content.strip():
+        raise ValueError("empty model response (thinking budget exhausted? "
+                         "raise --max-tokens)")
+    spec = _parse_json(content)
+    if not (isinstance(spec.get("steps"), list) and len(spec["steps"]) == 2):
+        return None
+    for step in spec["steps"]:
+        if not (step.get("question") and len(step.get("test_inputs", [])) >= 2
+                and step.get("function")):
+            return None
+    slug = f"{repo_meta.get('slug', 'repo')}-{root['file'].replace('/', '-').replace('.py', '')}-{root['function']}"
+    fn2src = {dep["function"]: dep["source"], root["function"]: root["source"]}
+    fn2mod = {dep["function"]: dep.get("module_hint", ""),
+              root["function"]: root.get("module_hint", "")}
+    sub_steps = []
+    for j, step in enumerate(spec["steps"]):
+        src = fn2src.get(step["function"])
+        if src is None:
+            return None
+        sub_steps.append({
+            "step_number": None,  # filled by verify (slug-k)
+            "function": step["function"],
+            "module_hint": fn2mod.get(step["function"], ""),
+            "step_description_prompt": step["question"],
+            "step_background": step.get("background", ""),
+            "function_header": _signature_of(src) + "\n    \"\"\"" + (
+                ast.get_docstring(ast.parse(src).body[0]) or "") + "\"\"\"",
+            "ground_truth_code": src,
+            "test_inputs": step["test_inputs"][:4],
+            "dependencies": spec.get("dependencies", []),
+        })
+    return {
+        "slug": slug[:120],
+        "repo": repo_meta,
+        "file": root["file"],
+        "function": root["function"],
+        "module_hint": group.get("module_hint", ""),
+        "chain": True,
+        "question": spec["question"],
+        "background": spec.get("background", ""),
+        "sub_steps": sub_steps,
+        "reference_source": root["source"],
+        "llm": {"temperature": temperature, "usage": llm.usage_of(resp)},
+    }
+
+
+def build_proposal(cand: dict, repo_meta: dict, temperature: float,
+                   max_tokens: int = 4096) -> dict | None:
     prompt = PROMPT.format(
         repo_url=repo_meta.get("url", "?"), commit=repo_meta.get("commit", "?"),
         license=repo_meta.get("license", "?"), file=cand["file"],
         source=cand["source"])
-    resp = llm.chat([{"role": "user", "content": prompt}], temperature=temperature)
+    resp = llm.chat([{"role": "user", "content": prompt}],
+                    temperature=temperature, max_tokens=max_tokens)
     text = resp["choices"][0]["message"].get("content") or ""
     # tolerate ```json fences
     text = text.strip()
@@ -102,6 +200,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path(".work/proposals.jsonl"))
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--temperature", type=float, default=0.7)
+    ap.add_argument("--max-tokens", type=int, default=4096)
     args = ap.parse_args()
 
     repo_meta = json.loads(args.repo_meta.read_text(encoding="utf-8"))
@@ -115,9 +214,14 @@ def main() -> None:
 
     def _one(cand):
         try:
-            return build_proposal(cand, repo_meta, args.temperature)
+            if "root" in cand and "dep" in cand:  # call-chain group
+                return build_group_proposal(cand, repo_meta, args.temperature,
+                                            args.max_tokens)
+            return build_proposal(cand, repo_meta, args.temperature,
+                                  args.max_tokens)
         except Exception as e:
-            print(f"  LLM error on {cand['file']}:{cand['function']}: {e}")
+            label = f"{cand.get('file', '?')}:{cand.get('function', '?')}"
+            print(f"  LLM error on {label}: {e}")
             return None
 
     with args.out.open("w", encoding="utf-8") as fp, \

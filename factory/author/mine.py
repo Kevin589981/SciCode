@@ -152,6 +152,46 @@ def mine_repo(root: Path, max_per_module: int = 3, limit: int | None = None,
     return out
 
 
+def find_call_groups(cands: list[dict], max_groups: int | None = None):
+    """Detect 2-level dependency chains among mined functions: A calls B
+    (both in the catalog) -> a natural multi-sub-step problem where step 1
+    implements B and step 2 implements A on top of the student's own B.
+    Upstream ground truth stays fully computable: A's original code calls
+    the original B.
+    """
+    by_name = {}
+    for c in cands:
+        by_name.setdefault(c["function"], c)
+    groups = []
+    seen = set()
+    for a in cands:
+        try:
+            tree = ast.parse(a["source"])
+        except SyntaxError:
+            continue
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                f = node.func
+                name = f.id if isinstance(f, ast.Name) else (
+                    f.attr if isinstance(f, ast.Attribute) else None)
+                if name:
+                    called.add(name)
+        for name in called:
+            b = by_name.get(name)
+            if b is None or b is a:
+                continue
+            key = (a["function"], b["function"])
+            if key in seen:
+                continue
+            seen.add(key)
+            groups.append({"root": a, "dep": b,
+                           "module_hint": a.get("module_hint", "")})
+            if max_groups and len(groups) >= max_groups:
+                return groups
+    return groups
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", type=Path, required=True,
@@ -162,9 +202,19 @@ def main() -> None:
     ap.add_argument("--import-root", type=Path, default=None,
                     help="dir the dotted module names must be importable "
                          "from (default: --repo)")
+    ap.add_argument("--groups", action="store_true",
+                    help="emit call-chain groups (A calls B) for multi-step "
+                         "problems instead of single functions")
     args = ap.parse_args()
     cands = mine_repo(args.repo, args.max_per_module, args.limit,
                       args.import_root)
+    if args.groups:
+        groups = find_call_groups(cands, args.limit)
+        with args.out.open("w", encoding="utf-8") as fp:
+            for g in groups:
+                fp.write(json.dumps(g) + chr(10))
+        print(f"found {len(groups)} call-chain groups -> {args.out}")
+        return
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8") as fp:
         for c in cands:
