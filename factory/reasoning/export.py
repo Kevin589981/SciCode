@@ -48,6 +48,40 @@ def _select_grades(grades: list[dict], judge_model: str | None) -> dict[str, dic
     return selected
 
 
+def _admitted_task_hashes(
+    *,
+    preflight_path: Path | None,
+    verification_path: Path | None,
+    preflight_model: str | None,
+    verifier_model: str | None,
+) -> set[str] | None:
+    """Recompute the same fail-closed admission intersection used by rollout."""
+    admission_sets = []
+    if preflight_path is not None:
+        records = _jsonl(Path(preflight_path))
+        if preflight_model is not None:
+            records = [
+                row
+                for row in records
+                if (row.get("critic") or {}).get("model") == preflight_model
+            ]
+        admission_sets.append(
+            {row.get("task_hash") for row in records if row.get("accepted") is True}
+        )
+    if verification_path is not None:
+        records = _jsonl(Path(verification_path))
+        if verifier_model is not None:
+            records = [
+                row
+                for row in records
+                if (row.get("verifier") or {}).get("model") == verifier_model
+            ]
+        admission_sets.append(
+            {row.get("task_hash") for row in records if row.get("accepted") is True}
+        )
+    return set.intersection(*admission_sets) if admission_sets else None
+
+
 def _sft_messages(trace: dict, grade: dict, inline_thinking: bool) -> list[dict]:
     annotations = {
         item["message_index"]: item for item in grade["message_annotations"]
@@ -122,6 +156,10 @@ def export_sft(
     output_path: Path,
     report_path: Path | None = None,
     judge_model: str | None = None,
+    preflight_path: Path | None = None,
+    verification_path: Path | None = None,
+    preflight_model: str | None = None,
+    verifier_model: str | None = None,
     inline_thinking: bool = False,
 ) -> dict:
     """Join artifacts and select by reasoning grade, never by executable status."""
@@ -131,6 +169,12 @@ def export_sft(
     traces = [validate_trace(trace) for trace in _jsonl(Path(traces_path))]
     raw_grades = _jsonl(Path(grades_path))
     grades = _select_grades(raw_grades, judge_model)
+    admitted_hashes = _admitted_task_hashes(
+        preflight_path=preflight_path,
+        verification_path=verification_path,
+        preflight_model=preflight_model,
+        verifier_model=verifier_model,
+    )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     report_path = report_path or output_path.with_suffix(".report.json")
@@ -143,6 +187,9 @@ def export_sft(
         task = tasks.get(trace["task_id"])
         if task is None:
             raise ExportError(f"no task found for trace {trace['trace_id']}")
+        if admitted_hashes is not None and trace["task_hash"] not in admitted_hashes:
+            counts["not_admitted"] += 1
+            continue
         grade = grades.get(trace["trace_id"])
         if grade is None:
             counts["ungraded"] += 1
@@ -169,6 +216,7 @@ def export_sft(
         "selected": counts["selected"],
         "rejected": counts["rejected"],
         "ungraded": counts["ungraded"],
+        "not_admitted": counts["not_admitted"],
         "inline_thinking": inline_thinking,
         "judge_model": judge_model,
         "by_archetype": dict(sorted(archetypes.items())),
@@ -192,6 +240,10 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--judge-model")
+    parser.add_argument("--preflight", type=Path)
+    parser.add_argument("--verification", type=Path)
+    parser.add_argument("--preflight-model")
+    parser.add_argument("--verifier-model")
     parser.add_argument("--inline-thinking", action="store_true")
     args = parser.parse_args()
     report = export_sft(
@@ -201,6 +253,10 @@ def main() -> None:
         output_path=args.out,
         report_path=args.report,
         judge_model=args.judge_model,
+        preflight_path=args.preflight,
+        verification_path=args.verification,
+        preflight_model=args.preflight_model,
+        verifier_model=args.verifier_model,
         inline_thinking=args.inline_thinking,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))

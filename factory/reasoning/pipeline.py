@@ -154,6 +154,10 @@ def run_pipeline(
         output_path=paths["sft"],
         report_path=paths["sft_report"],
         judge_model=judge_model,
+        preflight_path=paths["preflight"],
+        verification_path=paths["verification"],
+        preflight_model=critic_model,
+        verifier_model=verifier_model,
         inline_thinking=inline_thinking,
     )
     artifact_names = (

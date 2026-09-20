@@ -117,7 +117,13 @@ def create_audit_packet(
             validate_grade(grade, trace)
         difficulty = difficulty_by_hash.get(trace["task_hash"])
         band = (difficulty or {}).get("band", "missing")
-        auto_trainable = any(grade.get("trainable") is True for grade in grades)
+        source_verified = any(
+            row.get("accepted") is True
+            for row in verifications_by_hash.get(trace["task_hash"], [])
+        )
+        auto_trainable = source_verified and any(
+            grade.get("trainable") is True for grade in grades
+        )
         review_id = canonical_hash(
             {"trace_id": trace["trace_id"], "population_hash": population_hash}
         )

@@ -154,7 +154,9 @@ The primary files are:
 `sft.jsonl` selection is controlled by reasoning quality, not `reward == 1`.
 Executable outcomes may be attached to traces as auxiliary evidence. The
 canonical format keeps `reasoning_content` even when `--inline-thinking` is used;
-trainer-specific conversion must not silently discard it.
+trainer-specific conversion must not silently discard it. Pipeline export also
+recomputes the current critic/source-verifier admission intersection, so an old
+graded trace cannot re-enter candidate SFT after its task fails a newer gate.
 
 ### Difficulty calibration and quality release
 

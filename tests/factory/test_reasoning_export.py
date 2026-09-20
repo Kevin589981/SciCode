@@ -78,6 +78,67 @@ class ReasoningExportTests(unittest.TestCase):
             self.assertIn(assistant["reasoning_content"], assistant["content"])
             self.assertEqual(row["thinking_format"], "inline_and_preserved")
 
+    def test_historical_trace_without_current_admission_is_not_exported(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            admitted_task = task_for("derive_implement")
+            blocked_task = task_for("diagnose_revise")
+            admitted_trace = trace_for(admitted_task)
+            blocked_trace = trace_for(blocked_task)
+            tasks = root / "tasks.jsonl"
+            traces = root / "traces.jsonl"
+            grades = root / "grades.jsonl"
+            preflight = root / "preflight.jsonl"
+            verification = root / "verification.jsonl"
+            tasks.write_text(
+                "".join(json.dumps(row) + "\n" for row in (admitted_task, blocked_task)),
+                encoding="utf-8",
+            )
+            traces.write_text(
+                "".join(json.dumps(row) + "\n" for row in (admitted_trace, blocked_trace)),
+                encoding="utf-8",
+            )
+            grades.write_text(
+                "".join(
+                    json.dumps(grade_for(row, trainable=True)) + "\n"
+                    for row in (admitted_trace, blocked_trace)
+                ),
+                encoding="utf-8",
+            )
+            preflight.write_text(
+                "".join(
+                    json.dumps({
+                        "task_hash": row["task_hash"],
+                        "accepted": True,
+                        "critic": {"model": "critic"},
+                    }) + "\n"
+                    for row in (admitted_trace, blocked_trace)
+                ),
+                encoding="utf-8",
+            )
+            verification.write_text(
+                json.dumps({
+                    "task_hash": admitted_trace["task_hash"],
+                    "accepted": True,
+                    "verifier": {"model": "verifier"},
+                }) + "\n",
+                encoding="utf-8",
+            )
+            out = root / "sft.jsonl"
+            report = export_sft(
+                tasks,
+                traces,
+                grades,
+                output_path=out,
+                preflight_path=preflight,
+                verification_path=verification,
+                preflight_model="critic",
+                verifier_model="verifier",
+            )
+            rows = [json.loads(line) for line in out.read_text().splitlines()]
+            self.assertEqual([row["trace_id"] for row in rows], [admitted_trace["trace_id"]])
+            self.assertEqual(report["not_admitted"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
