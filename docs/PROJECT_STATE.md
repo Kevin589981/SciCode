@@ -139,12 +139,12 @@ Batch production v2 is implemented locally:
 - isolated repository/job artifact shards and deterministic atomic aggregation;
 - split enqueue/worker/status/aggregate commands and a bounded `auto` command.
 
-Offline verification currently passes 60 tests plus 6 subtests. The v2 commits
+Offline verification currently passes 61 tests plus 6 subtests. The v2 commits
 have been pushed and the `yicloud` checkout kept synchronized. A bounded live
 GitHub smoke resolved exact SHAs with no API errors; after the high-precision
 scope and documentation filters were applied, `CURENT/andes` was the leading
 candidate and the awesome-list result was recorded in the rejection ledger.
-Quality/difficulty v3 is implemented locally:
+Quality/difficulty v3 is implemented, pushed, and synchronized to `yicloud`:
 
 - critic-aware preflight IDs prevent reuse across different critic models;
 - independent task verification requires two exact quotes grounded in the
@@ -163,13 +163,32 @@ Quality/difficulty v3 is implemented locally:
 - release SFT fails closed without population-matched human approval,
   calibrated medium/hard difficulty, source verification, and multi-judge
   consensus;
+- candidate export recomputes the current preflight/verifier intersection, so
+  a historically graded trace cannot re-enter after a newer task gate fails;
+- author/solver, critic, verifier, and judge token budgets are independent, so
+  a 16k reasoning budget does not multiply every admission-stage request;
 - batch aggregation emits the tasks, preflights, verifications, traces, and
   grades required to reproduce those gates rather than only a candidate SFT.
 
-The remaining operational work is to commit/synchronize v3, re-run the Kimi
-smoke through source verification, and prepare (not fabricate) the human review
-packet. Human labels and a genuinely distinct solver/judge panel are external
-evidence and must not be simulated with repeated Kimi aliases.
+The live Kimi smoke in `data-reasoning-smoke-v1/` exercised these boundaries:
+
+- all three tasks passed the critic-aware depth preflight;
+- two tasks passed exact-source verification; the third verifier response was
+  incomplete at the 4096-token boundary and was recorded as an error, not
+  admitted;
+- gated export produced three selected historical/current traces, one
+  grade-rejected trace, and excluded the unverified task's historical trace;
+- the five-row blind audit packet contains no model, outcome, provenance, or
+  automatic-decision fields; its separate key has three automatic positives
+  and two negatives, with no unverified positive;
+- the one-model/no-assessment diagnostic labels all three tasks
+  `uncalibrated`; it is explicitly not a measured difficulty result;
+- empty human reviews produce `release_approved: false`, and the release
+  command exits with `human calibration has not approved release`.
+
+The remaining evidence is deliberately external: real human labels and a
+genuinely distinct solver/evaluator/judge panel. They must not be simulated
+with repeated Kimi aliases.
 
 ## Smoke Endpoint
 

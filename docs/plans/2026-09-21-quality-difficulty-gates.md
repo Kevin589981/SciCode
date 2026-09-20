@@ -66,6 +66,11 @@ population. Default row gates additionally require calibrated `medium`/`hard`
 difficulty, independent source verification, two independent judges, and 0.67
 trainable consensus. Rejection reasons are emitted as an audit JSONL.
 
+Candidate export applies the same current preflight/source-verifier
+intersection as rollout. This matters for append-only resumable artifacts: an
+old graded trace from a task that fails a newer verifier policy cannot silently
+return to the candidate set.
+
 ## Honest residual limits
 
 No code can manufacture independent scientific evidence from one model. With
