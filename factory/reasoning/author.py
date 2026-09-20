@@ -17,20 +17,37 @@ class AuthorError(ValueError):
     """An author response could not be converted into a valid task."""
 
 
-def _json_object(text: str) -> dict:
+def _json_objects(text: str) -> list[dict]:
+    """Find complete JSON objects without mistaking partial CoT for a result."""
     text = (text or "").strip()
-    if text.startswith("```"):
-        parts = text.split("```", 2)
-        text = parts[1] if len(parts) > 1 else ""
-        if text.lstrip().startswith("json"):
-            text = text.lstrip()[4:]
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise AuthorError(f"author response is not valid JSON: {exc}") from exc
-    if not isinstance(value, dict):
-        raise AuthorError("author JSON must be an object")
-    return value
+    if not text:
+        return []
+    candidates = [text]
+    candidates.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL
+        )
+    )
+    decoder = json.JSONDecoder()
+    decoded: list[tuple[int, dict]] = []
+    seen = set()
+    for candidate in candidates:
+        starts = [0] if candidate.startswith("{") else []
+        starts.extend(index for index, char in enumerate(candidate) if char == "{")
+        for start in dict.fromkeys(starts):
+            try:
+                value, end = decoder.raw_decode(candidate[start:])
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(value, dict):
+                continue
+            fingerprint = json.dumps(value, sort_keys=True, ensure_ascii=False)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            decoded.append((end, value))
+    return [value for _size, value in sorted(decoded, reverse=True, key=lambda x: x[0])]
 
 
 def task_id_for(candidate: dict, archetype: str, repo_meta: dict) -> str:
@@ -66,51 +83,87 @@ def compose_task(
     temperature: float = 0.3,
     max_tokens: int = 8192,
     timeout: int = 1200,
+    max_attempts: int = 1,
 ) -> dict:
     """Ask an author model for one task, attach trusted source metadata, validate."""
     if archetype not in ARCHETYPES:
         raise AuthorError(f"unknown archetype: {archetype}")
+    if max_attempts < 1:
+        raise AuthorError("max_attempts must be positive")
     prompt = author_prompt(candidate, archetype, repo_meta)
-    response = chat_fn(
-        [{"role": "user", "content": prompt}],
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-    )
-    try:
-        message = response["choices"][0]["message"]
-        spec = _json_object(message.get("content") or "")
-    except (KeyError, IndexError, TypeError) as exc:
-        raise AuthorError(f"author response has no usable message: {exc}") from exc
-    task = {
-        "schema_version": TASK_SCHEMA,
-        "task_id": task_id_for(candidate, archetype, repo_meta),
-        "archetype": archetype,
-        "source": {
-            "repo": str(repo_meta.get("url") or "unknown"),
-            "commit": str(repo_meta.get("commit") or "unpinned"),
-            "file": str(candidate.get("file") or "unknown"),
-            "symbol": str(candidate.get("function") or "unknown"),
-            "license": str(repo_meta.get("license") or "unknown"),
-            "module_hint": str(candidate.get("module_hint") or ""),
-            "source": str(candidate.get("source") or ""),
-        },
-        "problem": spec.get("problem"),
-        "deliverable": spec.get("deliverable"),
-        "reasoning_contract": spec.get("reasoning_contract"),
-        "archetype_payload": spec.get("archetype_payload"),
-        "authoring": {
-            "model": model or llm.client_config()["model"],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "usage": response.get("usage") or {},
-        },
-    }
-    try:
-        return validate_task(task)
-    except SchemaError as exc:
-        raise AuthorError(f"author JSON violates the task schema: {exc}") from exc
+    failures = []
+    for attempt in range(1, max_attempts + 1):
+        attempt_prompt = prompt
+        if attempt > 1:
+            attempt_prompt += (
+                "\nA prior response failed structural validation. Keep internal "
+                "reasoning concise and emit the complete final JSON object before "
+                "the token budget is exhausted."
+            )
+        response = chat_fn(
+            [{"role": "user", "content": attempt_prompt}],
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+        try:
+            choice = response["choices"][0]
+            message = choice["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            failures.append(f"attempt {attempt}: no usable message ({exc})")
+            continue
+        fields = (
+            ("content", message.get("content") or ""),
+            ("reasoning_content", message.get("reasoning_content") or ""),
+        )
+        schema_errors = []
+        for response_field, response_text in fields:
+            for spec in _json_objects(response_text):
+                task = {
+                    "schema_version": TASK_SCHEMA,
+                    "task_id": task_id_for(candidate, archetype, repo_meta),
+                    "archetype": archetype,
+                    "source": {
+                        "repo": str(repo_meta.get("url") or "unknown"),
+                        "commit": str(repo_meta.get("commit") or "unpinned"),
+                        "file": str(candidate.get("file") or "unknown"),
+                        "symbol": str(candidate.get("function") or "unknown"),
+                        "license": str(repo_meta.get("license") or "unknown"),
+                        "module_hint": str(candidate.get("module_hint") or ""),
+                        "source": str(candidate.get("source") or ""),
+                    },
+                    "problem": spec.get("problem"),
+                    "deliverable": spec.get("deliverable"),
+                    "reasoning_contract": spec.get("reasoning_contract"),
+                    "archetype_payload": spec.get("archetype_payload"),
+                    "authoring": {
+                        "model": model or llm.client_config()["model"],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "attempt": attempt,
+                        "response_field": response_field,
+                        "finish_reason": choice.get("finish_reason"),
+                        "response_chars": {
+                            name: len(value) for name, value in fields
+                        },
+                        "usage": response.get("usage") or {},
+                    },
+                }
+                try:
+                    return validate_task(task)
+                except SchemaError as exc:
+                    schema_errors.append(str(exc))
+        usage = response.get("usage") or {}
+        failures.append(
+            "attempt "
+            f"{attempt}: no valid task object; finish_reason="
+            f"{choice.get('finish_reason')!r}, content_chars={len(fields[0][1])}, "
+            f"reasoning_chars={len(fields[1][1])}, completion_tokens="
+            f"{usage.get('completion_tokens')!r}, schema_error="
+            f"{(schema_errors[0] if schema_errors else 'no complete JSON object')[:300]}"
+        )
+    raise AuthorError("; ".join(failures))
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -148,6 +201,7 @@ def run_authoring(
     max_tokens: int = 8192,
     timeout: int = 1200,
     concurrency: int = 1,
+    max_attempts: int = 1,
     errors_path: Path | None = None,
 ) -> dict:
     """Compose tasks with bounded concurrency and append-safe task-ID resume."""
@@ -185,6 +239,7 @@ def run_authoring(
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            max_attempts=max_attempts,
         )
 
     with output_path.open("a", encoding="utf-8") as output, Path(errors_path).open(
@@ -229,6 +284,7 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--timeout", type=int, default=1200)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--max-attempts", type=int, default=1)
     args = parser.parse_args()
     result = run_authoring(
         args.mined,
@@ -241,6 +297,7 @@ def main() -> None:
         max_tokens=args.max_tokens,
         timeout=args.timeout,
         concurrency=args.concurrency,
+        max_attempts=args.max_attempts,
     )
     print(json.dumps(result, indent=2))
 

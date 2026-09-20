@@ -3,7 +3,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from factory.reasoning.grade import GradeError, judge_trace, run_grading
+from factory.reasoning.grade import (
+    GRADE_POLICY_VERSION,
+    GradeError,
+    judge_trace,
+    run_grading,
+)
 from factory.reasoning.schema import validate_grade
 from tests.factory_fixtures import task_for, trace_for
 
@@ -75,6 +80,20 @@ class ReasoningGradeTests(unittest.TestCase):
         self.assertFalse(grade["trainable"])
         self.assertEqual(trace["outcome"]["status"], "pass")
 
+    def test_moderately_repetitive_reasoning_only_trace_is_salvaged(self):
+        response = judge_response(strong=True)
+        body = json.loads(response["choices"][0]["message"]["content"])
+        body["scores"]["degeneracy"] = 2
+        body["message_annotations"][0]["train_content"] = False
+        response["choices"][0]["message"]["content"] = json.dumps(body)
+        grade = judge_trace(
+            task_for(), trace_for(),
+            chat_fn=lambda *_a, **_k: response, model="judge",
+        )
+        self.assertTrue(grade["trainable"])
+        self.assertTrue(grade["message_annotations"][0]["train_reasoning"])
+        self.assertFalse(grade["message_annotations"][0]["train_content"])
+
     def test_invalid_score_is_rejected(self):
         invalid = judge_response()
         body = json.loads(invalid["choices"][0]["message"]["content"])
@@ -106,6 +125,10 @@ class ReasoningGradeTests(unittest.TestCase):
                 tasks_path, traces_path, out,
                 chat_fn=fake_chat, model="judge-a", concurrency=1,
             )
+            stale = json.loads(out.read_text(encoding="utf-8").strip())
+            stale["trainable"] = False
+            stale.pop("policy_version")
+            out.write_text(json.dumps(stale) + "\n", encoding="utf-8")
             second = run_grading(
                 tasks_path, traces_path, out,
                 chat_fn=fake_chat, model="judge-a", concurrency=1,
@@ -123,6 +146,8 @@ class ReasoningGradeTests(unittest.TestCase):
             self.assertEqual(third["written"], 1)
             self.assertEqual(calls, ["judge-a", "judge-b"])
             self.assertEqual(len({row["grade_id"] for row in rows}), 2)
+            self.assertTrue(rows[0]["trainable"])
+            self.assertEqual(rows[0]["policy_version"], GRADE_POLICY_VERSION)
 
 
 if __name__ == "__main__":

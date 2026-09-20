@@ -126,6 +126,37 @@ class ReasoningAuthorTests(unittest.TestCase):
         with self.assertRaisesRegex(AuthorError, "JSON"):
             compose_task(candidate(), "derive_implement", REPO_META, chat_fn=bad_chat)
 
+    def test_recovers_task_json_from_native_reasoning_field(self):
+        response = response_for("derive_implement")
+        response["choices"][0]["message"] = {
+            "content": "",
+            "reasoning_content": "draft\n" + response["choices"][0]["message"]["content"],
+        }
+        task = compose_task(
+            candidate(), "derive_implement", REPO_META,
+            chat_fn=lambda *_a, **_k: response, model="author-model",
+        )
+        self.assertEqual(task["authoring"]["response_field"], "reasoning_content")
+
+    def test_retries_a_structurally_invalid_response(self):
+        calls = []
+
+        def flaky_chat(messages, **kwargs):
+            calls.append(messages[0]["content"])
+            if len(calls) == 1:
+                return {
+                    "choices": [{"message": {"content": "not json"}, "finish_reason": "length"}],
+                    "usage": {"completion_tokens": 8192},
+                }
+            return response_for("derive_implement")
+
+        task = compose_task(
+            candidate(), "derive_implement", REPO_META,
+            chat_fn=flaky_chat, model="author-model", max_attempts=2,
+        )
+        self.assertEqual(task["authoring"]["attempt"], 2)
+        self.assertIn("prior response failed", calls[1])
+
     def test_run_authoring_resumes_without_duplicate_calls(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

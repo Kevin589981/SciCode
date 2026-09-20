@@ -51,6 +51,7 @@ def run_pipeline(
     max_tokens: int = 16384,
     timeout: int = 2400,
     concurrency: int = 3,
+    author_attempts: int = 2,
     factory_commit: str | None = None,
     inline_thinking: bool = False,
 ) -> dict:
@@ -88,6 +89,7 @@ def run_pipeline(
         max_tokens=max_tokens,
         timeout=timeout,
         concurrency=concurrency,
+        max_attempts=author_attempts,
     )
     preflight_result = run_preflight(
         paths["tasks"],
@@ -152,6 +154,7 @@ def run_pipeline(
             "max_tokens": max_tokens,
             "timeout": timeout,
             "concurrency": concurrency,
+            "author_attempts": author_attempts,
             "inline_thinking": inline_thinking,
         },
         "inputs": {
@@ -191,6 +194,7 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument("--timeout", type=int, default=2400)
     parser.add_argument("--concurrency", type=int, default=3)
+    parser.add_argument("--author-attempts", type=int, default=2)
     parser.add_argument("--inline-thinking", action="store_true")
     args = parser.parse_args()
     manifest = run_pipeline(
@@ -208,6 +212,7 @@ def main() -> None:
         max_tokens=args.max_tokens,
         timeout=args.timeout,
         concurrency=args.concurrency,
+        author_attempts=args.author_attempts,
         inline_thinking=args.inline_thinking,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

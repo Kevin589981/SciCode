@@ -23,6 +23,9 @@ class GradeError(ValueError):
     """A trace cannot be graded or a judge response is invalid."""
 
 
+GRADE_POLICY_VERSION = "reasoning-value-v2"
+
+
 def grade_id_for(trace: dict, model: str) -> str:
     return canonical_hash({"trace_id": trace["trace_id"], "judge_model": model})
 
@@ -112,7 +115,10 @@ def _trainability(scores: dict, annotations: list[dict]) -> bool:
         and scores["strategy"] >= 2
         and scores["evidence_use"] >= 2
         and scores["insight_density"] >= 2
-        and scores["degeneracy"] <= 1
+        # Moderate repetition or a truncated final answer does not erase a
+        # scientifically useful reasoning trajectory. Reject only traces the
+        # judge rates as severely degenerate.
+        and scores["degeneracy"] <= 2
         and any(
             item.get("train_reasoning") or item.get("train_content")
             for item in annotations
@@ -173,6 +179,7 @@ def judge_trace(
         "trace_id": trace["trace_id"],
         "scores": {name: scores[name] for name in SCORE_NAMES},
         "trainable": _trainability(scores, annotations),
+        "policy_version": GRADE_POLICY_VERSION,
         "rationale": rationale,
         "message_annotations": annotations,
         "judge": {
@@ -228,6 +235,19 @@ def run_grading(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     errors_path = errors_path or output_path.with_suffix(".errors.jsonl")
     existing = _jsonl(output_path) if output_path.exists() else []
+    policy_changed = False
+    for row in existing:
+        trainable = _trainability(row.get("scores") or {}, row.get("message_annotations") or [])
+        if row.get("trainable") != trainable or row.get("policy_version") != GRADE_POLICY_VERSION:
+            row["trainable"] = trainable
+            row["policy_version"] = GRADE_POLICY_VERSION
+            policy_changed = True
+    if policy_changed:
+        tmp_path = output_path.with_name(output_path.name + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as output:
+            for row in existing:
+                output.write(json.dumps(row, ensure_ascii=False) + "\n")
+        tmp_path.replace(output_path)
     done = {row.get("grade_id") for row in existing}
     jobs = []
     skipped = 0
@@ -315,4 +335,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
