@@ -465,6 +465,7 @@ def main() -> None:
         request_interval=args.request_interval,
     )
     discovery_errors = []
+    discovery_rejections = []
     repositories = discover_repositories(
         keywords,
         search_fn=github.search,
@@ -475,6 +476,7 @@ def main() -> None:
         per_page=args.per_page,
         limit=args.repository_limit,
         errors=discovery_errors,
+        rejections=discovery_rejections,
     )
     repositories = pin_repository_heads(
         repositories,
@@ -484,6 +486,7 @@ def main() -> None:
     catalog_path = output_root / "catalog.jsonl"
     write_catalog(catalog_path, repositories)
     write_catalog(output_root / "discovery.errors.jsonl", discovery_errors)
+    write_catalog(output_root / "discovery.rejections.jsonl", discovery_rejections)
     enqueue_result = enqueue_catalog(
         queue,
         catalog_path,
@@ -502,6 +505,7 @@ def main() -> None:
             {
                 "discovered": len(repositories),
                 "discovery_errors": len(discovery_errors),
+                "discovery_rejections": len(discovery_rejections),
                 "enqueue": enqueue_result,
                 "workers": worker_results,
                 "aggregate": report,

@@ -7,6 +7,7 @@ from factory.reasoning.discovery import (
     discover_repositories,
     expand_keywords,
     load_keywords,
+    metadata_rejection,
     pin_repository_heads,
     write_catalog,
 )
@@ -152,6 +153,29 @@ class ReasoningDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(len(pinned), 1)
         self.assertEqual(pin_errors[0]["repository"], "gone/repo")
+
+    def test_documentation_collections_are_rejected_before_clone_or_llm(self):
+        documentation = repository(
+            1,
+            "org/awesome-numerics",
+            description="A curated list of numerical analysis resources",
+        )
+        implementation = repository(
+            2,
+            "org/finite-volume-solver",
+            description="Finite-volume simulation library for conservation laws",
+        )
+        rejections = []
+        rows = discover_repositories(
+            ["numerical analysis"],
+            search_fn=lambda *_a, **_k: [documentation, implementation],
+            rejections=rejections,
+        )
+        self.assertEqual(
+            [row["full_name"] for row in rows], [implementation["full_name"]]
+        )
+        self.assertEqual(rejections[0]["reason"], "documentation_or_collection_name")
+        self.assertIsNone(metadata_rejection(rows[0]))
 
 
 if __name__ == "__main__":

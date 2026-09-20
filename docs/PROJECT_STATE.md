@@ -121,6 +121,8 @@ Batch production v2 is implemented locally:
 - curated/optionally expanded scientific query discovery with serial,
   rate-limit-aware GitHub Search;
 - metadata filtering and repository-ID deduplication before clone or LLM use;
+- high-confidence documentation/list/curriculum rejection with an auditable
+  rejection ledger before clone or LLM use;
 - immutable default-branch commit pinning for admitted catalog entries;
 - per-query/per-repository discovery error ledgers so one deleted or transiently
   unavailable candidate does not discard an otherwise valid batch;
@@ -133,7 +135,7 @@ Batch production v2 is implemented locally:
 - isolated repository/job artifact shards and deterministic atomic aggregation;
 - split enqueue/worker/status/aggregate commands and a bounded `auto` command.
 
-Offline verification currently passes 45 tests plus 6 subtests. The remaining
+Offline verification currently passes 46 tests plus 6 subtests. The remaining
 operational step is to commit/push v2, advance the `yicloud` checkout to the
 same commit, and run a small real GitHub discovery smoke before large-scale
 generation.

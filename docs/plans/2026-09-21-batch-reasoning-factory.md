@@ -44,6 +44,8 @@ enter the durable queue. Sources:
 2. Search GitHub serially, filter cheap metadata, merge duplicate repository IDs,
    and rank candidates by independent keyword matches and stars. Persist
    exhausted per-query failures without throwing away successful queries.
+   Reject strong documentation/list/curriculum signals here and retain a
+   rejection ledger, before spending clone or model capacity.
 3. Resolve the final candidates' mutable default branches to exact commit SHAs.
 4. Enqueue one job per `(repository snapshot, canonical recipe)` in SQLite.
 5. Atomically lease jobs to workers. Heartbeats keep long jobs alive; expired

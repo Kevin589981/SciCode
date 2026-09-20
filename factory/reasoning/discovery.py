@@ -27,6 +27,25 @@ from ..author import llm
 from .author import _json_objects
 
 DEFAULT_KEYWORDS_PATH = Path(__file__).with_name("science_keywords.txt")
+DOCUMENTATION_NAME_RE = re.compile(
+    r"(?:^|[-_.])(awesome|papers?|books?|courses?|curriculum|roadmap)(?:$|[-_.])",
+    re.IGNORECASE,
+)
+DOCUMENTATION_DESCRIPTION_RE = re.compile(
+    r"\b(curated\s+(?:list|collection)|"
+    r"(?:list|collection)\s+of\s+(?:awesome\s+)?(?:resources?|papers?|books?)|"
+    r"curriculum\s+for|lecture\s+notes?|learning\s+resources?)\b",
+    re.IGNORECASE,
+)
+DOCUMENTATION_TOPICS = {
+    "awesome",
+    "awesome-list",
+    "book-list",
+    "course-list",
+    "lecture-notes",
+    "paper-list",
+    "reading-list",
+}
 
 
 class DiscoveryError(RuntimeError):
@@ -285,6 +304,20 @@ def _candidate(item: dict, keyword: str) -> dict | None:
     }
 
 
+def metadata_rejection(candidate: dict) -> str | None:
+    """Reject high-confidence documentation/list repositories before cloning."""
+    name = str(candidate.get("full_name") or "").rsplit("/", 1)[-1]
+    description = str(candidate.get("description") or "")
+    topics = {str(value).casefold() for value in candidate.get("topics") or []}
+    if DOCUMENTATION_NAME_RE.search(name):
+        return "documentation_or_collection_name"
+    if DOCUMENTATION_DESCRIPTION_RE.search(description):
+        return "documentation_or_collection_description"
+    if topics & DOCUMENTATION_TOPICS:
+        return "documentation_or_collection_topic"
+    return None
+
+
 def discover_repositories(
     keywords: Iterable[str],
     *,
@@ -296,6 +329,7 @@ def discover_repositories(
     per_page: int = 30,
     limit: int | None = None,
     errors: list[dict] | None = None,
+    rejections: list[dict] | None = None,
 ) -> list[dict]:
     """Retrieve and deduplicate candidates; no model or clone occurs here."""
     if min_stars < 0 or max_size_kb < 1 or pages_per_query < 1 or per_page < 1:
@@ -325,13 +359,29 @@ def discover_repositories(
             candidate = _candidate(item, keyword)
             if candidate is None:
                 continue
-            if (
-                candidate["stars"] < min_stars
-                or candidate["size_kb"] > max_size_kb
-                or candidate["archived"]
-                or candidate["fork"]
-                or candidate["disabled"]
-            ):
+            reason = None
+            if candidate["stars"] < min_stars:
+                reason = "below_minimum_stars"
+            elif candidate["size_kb"] > max_size_kb:
+                reason = "above_maximum_size"
+            elif candidate["archived"]:
+                reason = "archived"
+            elif candidate["fork"]:
+                reason = "fork"
+            elif candidate["disabled"]:
+                reason = "disabled"
+            else:
+                reason = metadata_rejection(candidate)
+            if reason:
+                if rejections is not None:
+                    rejections.append(
+                        {
+                            "stage": "metadata_filter",
+                            "repository": candidate["full_name"],
+                            "keyword": keyword,
+                            "reason": reason,
+                        }
+                    )
                 continue
             existing = by_id.get(candidate["repo_id"])
             if existing is None:
@@ -443,6 +493,7 @@ def main() -> None:
         request_interval=args.request_interval,
     )
     errors = []
+    rejections = []
     rows = discover_repositories(
         keywords,
         search_fn=client.search,
@@ -453,19 +504,24 @@ def main() -> None:
         per_page=args.per_page,
         limit=args.limit,
         errors=errors,
+        rejections=rejections,
     )
     rows = pin_repository_heads(rows, resolve_fn=client.head_commit, errors=errors)
     write_catalog(args.out, rows)
     errors_path = args.out.with_name(args.out.name + ".errors.jsonl")
+    rejections_path = args.out.with_name(args.out.name + ".rejections.jsonl")
     write_catalog(errors_path, errors)
+    write_catalog(rejections_path, rejections)
     print(
         json.dumps(
             {
                 "queries": len(keywords),
                 "repositories": len(rows),
                 "errors": len(errors),
+                "rejections": len(rejections),
                 "out": str(args.out),
                 "errors_out": str(errors_path),
+                "rejections_out": str(rejections_path),
             }
         )
     )
