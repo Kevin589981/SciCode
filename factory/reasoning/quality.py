@@ -7,7 +7,9 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from .grade import current_grades
 from .schema import canonical_hash, validate_grade, validate_task, validate_trace
+from .verify import VERIFICATION_POLICY
 
 AUDIT_SCHEMA = "scicode-human-audit-v1"
 CALIBRATION_SCHEMA = "scicode-human-calibration-v1"
@@ -98,7 +100,7 @@ def create_audit_packet(
     tasks = {task["task_id"]: validate_task(task) for task in _jsonl(Path(tasks_path))}
     traces = [validate_trace(trace) for trace in _jsonl(Path(traces_path))]
     grades_by_trace = defaultdict(list)
-    for grade in _jsonl(Path(grades_path)):
+    for grade in current_grades(_jsonl(Path(grades_path))):
         grades_by_trace[grade.get("trace_id")].append(grade)
     verifications_by_hash = defaultdict(list)
     for row in _jsonl(Path(verifications_path)):
@@ -119,6 +121,7 @@ def create_audit_packet(
         band = (difficulty or {}).get("band", "missing")
         source_verified = any(
             row.get("accepted") is True
+            and row.get("policy_version") == VERIFICATION_POLICY
             for row in verifications_by_hash.get(trace["task_hash"], [])
         )
         auto_trainable = source_verified and any(
@@ -473,7 +476,7 @@ def release_sft(
         raise QualityError("human calibration belongs to another trace population")
     policy = load_release_policy(policy_path)
     grades_by_trace = defaultdict(list)
-    for grade in _jsonl(Path(grades_path)):
+    for grade in current_grades(_jsonl(Path(grades_path))):
         grades_by_trace[grade.get("trace_id")].append(grade)
     verifications_by_hash = defaultdict(list)
     for row in _jsonl(Path(verifications_path)):
@@ -524,6 +527,7 @@ def release_sft(
             (verification.get("verifier") or {}).get("model")
             for verification in verifications_by_hash.get(trace["task_hash"], [])
             if verification.get("accepted") is True
+            and verification.get("policy_version") == VERIFICATION_POLICY
         }
         accepted_verifiers.discard(None)
         if policy.get("require_role_separation", True) and author_model:

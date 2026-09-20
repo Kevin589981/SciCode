@@ -7,7 +7,10 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from .grade import GradeError, current_grades
+from .preflight import PREFLIGHT_POLICY
 from .schema import validate_grade, validate_task, validate_trace
+from .verify import VERIFICATION_POLICY
 
 SFT_SCHEMA = "scicode-reasoning-sft-v1"
 
@@ -34,10 +37,12 @@ def _jsonl(path: Path) -> list[dict]:
 
 def _select_grades(grades: list[dict], judge_model: str | None) -> dict[str, dict]:
     grouped = defaultdict(list)
-    for grade in grades:
-        model = (grade.get("judge") or {}).get("model")
-        if judge_model is None or model == judge_model:
-            grouped[grade.get("trace_id")].append(grade)
+    try:
+        selected_grades = current_grades(grades, judge_model)
+    except GradeError as exc:
+        raise ExportError(str(exc)) from exc
+    for grade in selected_grades:
+        grouped[grade.get("trace_id")].append(grade)
     selected = {}
     for trace_id, options in grouped.items():
         if len(options) > 1:
@@ -65,6 +70,9 @@ def _admitted_task_hashes(
                 for row in records
                 if (row.get("critic") or {}).get("model") == preflight_model
             ]
+        records = [
+            row for row in records if row.get("policy_version") == PREFLIGHT_POLICY
+        ]
         admission_sets.append(
             {row.get("task_hash") for row in records if row.get("accepted") is True}
         )
@@ -76,6 +84,11 @@ def _admitted_task_hashes(
                 for row in records
                 if (row.get("verifier") or {}).get("model") == verifier_model
             ]
+        records = [
+            row
+            for row in records
+            if row.get("policy_version") == VERIFICATION_POLICY
+        ]
         admission_sets.append(
             {row.get("task_hash") for row in records if row.get("accepted") is True}
         )

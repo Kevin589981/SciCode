@@ -142,12 +142,13 @@ class ReasoningGradeTests(unittest.TestCase):
                 for line in out.read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual(first["written"], 1)
-            self.assertEqual(second["skipped"], 1)
+            self.assertEqual(second["written"], 1)
             self.assertEqual(third["written"], 1)
-            self.assertEqual(calls, ["judge-a", "judge-b"])
+            self.assertEqual(calls, ["judge-a", "judge-a", "judge-b"])
             self.assertEqual(len({row["grade_id"] for row in rows}), 2)
-            self.assertTrue(rows[0]["trainable"])
-            self.assertEqual(rows[0]["policy_version"], GRADE_POLICY_VERSION)
+            self.assertNotIn("policy_version", rows[0])
+            self.assertTrue(rows[1]["trainable"])
+            self.assertEqual(rows[1]["policy_version"], GRADE_POLICY_VERSION)
 
 
 if __name__ == "__main__":

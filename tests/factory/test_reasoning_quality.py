@@ -12,6 +12,7 @@ from factory.reasoning.quality import (
     release_sft,
 )
 from factory.reasoning.schema import canonical_hash
+from factory.reasoning.verify import VERIFICATION_POLICY
 from tests.factory_fixtures import grade_for, task_for, trace_for
 
 
@@ -29,6 +30,7 @@ def artifacts(root):
     verification = {
         "task_hash": trace["task_hash"],
         "accepted": True,
+        "policy_version": VERIFICATION_POLICY,
         "verifier": {"model": "verifier-a"},
     }
     difficulty = {

@@ -157,6 +157,9 @@ canonical format keeps `reasoning_content` even when `--inline-thinking` is used
 trainer-specific conversion must not silently discard it. Pipeline export also
 recomputes the current critic/source-verifier admission intersection, so an old
 graded trace cannot re-enter candidate SFT after its task fails a newer gate.
+Admission and grading resume identities include their policy versions; changing
+a rubric therefore triggers fresh decisions instead of relabeling old model
+outputs as if they had been produced under the new policy.
 
 ### Difficulty calibration and quality release
 

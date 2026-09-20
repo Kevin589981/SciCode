@@ -13,7 +13,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..author import llm
+from .preflight import PREFLIGHT_POLICY
 from .schema import TRACE_SCHEMA, canonical_hash, validate_task, validate_trace
+from .verify import VERIFICATION_POLICY
 
 
 class RolloutError(ValueError):
@@ -207,6 +209,9 @@ def run_rollouts(
                 for row in records
                 if (row.get("critic") or {}).get("model") == preflight_model
             ]
+        records = [
+            row for row in records if row.get("policy_version") == PREFLIGHT_POLICY
+        ]
         admission_sets.append(
             {row.get("task_hash") for row in records if row.get("accepted") is True}
         )
@@ -218,6 +223,11 @@ def run_rollouts(
                 for row in records
                 if (row.get("verifier") or {}).get("model") == verifier_model
             ]
+        records = [
+            row
+            for row in records
+            if row.get("policy_version") == VERIFICATION_POLICY
+        ]
         admission_sets.append(
             {row.get("task_hash") for row in records if row.get("accepted") is True}
         )

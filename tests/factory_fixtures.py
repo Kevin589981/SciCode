@@ -1,5 +1,6 @@
 """Shared deterministic records for reasoning-factory tests."""
 
+from factory.reasoning.grade import GRADE_POLICY_VERSION, grade_id_for
 from factory.reasoning.schema import GRADE_SCHEMA, TASK_SCHEMA, TRACE_SCHEMA, canonical_hash
 
 
@@ -101,7 +102,7 @@ def trace_for(task=None, *, outcome="fail"):
 
 def grade_for(trace=None, *, trainable=True):
     trace = trace or trace_for()
-    return {
+    grade = {
         "schema_version": GRADE_SCHEMA,
         "trace_id": trace["trace_id"],
         "scores": {
@@ -125,4 +126,7 @@ def grade_for(trace=None, *, trainable=True):
             }
         ],
         "judge": {"model": "fake-judge"},
+        "policy_version": GRADE_POLICY_VERSION,
     }
+    grade["grade_id"] = grade_id_for(trace, grade["judge"]["model"])
+    return grade

@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 
 from factory.reasoning.export import SFT_SCHEMA, export_sft
+from factory.reasoning.preflight import PREFLIGHT_POLICY
+from factory.reasoning.verify import VERIFICATION_POLICY
 from tests.factory_fixtures import grade_for, task_for, trace_for
 
 
@@ -110,6 +112,7 @@ class ReasoningExportTests(unittest.TestCase):
                     json.dumps({
                         "task_hash": row["task_hash"],
                         "accepted": True,
+                        "policy_version": PREFLIGHT_POLICY,
                         "critic": {"model": "critic"},
                     }) + "\n"
                     for row in (admitted_trace, blocked_trace)
@@ -117,11 +120,20 @@ class ReasoningExportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             verification.write_text(
-                json.dumps({
-                    "task_hash": admitted_trace["task_hash"],
-                    "accepted": True,
-                    "verifier": {"model": "verifier"},
-                }) + "\n",
+                "".join(json.dumps(row) + "\n" for row in (
+                    {
+                        "task_hash": admitted_trace["task_hash"],
+                        "accepted": True,
+                        "policy_version": VERIFICATION_POLICY,
+                        "verifier": {"model": "verifier"},
+                    },
+                    {
+                        "task_hash": blocked_trace["task_hash"],
+                        "accepted": True,
+                        "policy_version": "obsolete-source-policy",
+                        "verifier": {"model": "verifier"},
+                    },
+                )),
                 encoding="utf-8",
             )
             out = root / "sft.jsonl"

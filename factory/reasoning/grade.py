@@ -27,7 +27,40 @@ GRADE_POLICY_VERSION = "reasoning-value-v2"
 
 
 def grade_id_for(trace: dict, model: str) -> str:
-    return canonical_hash({"trace_id": trace["trace_id"], "judge_model": model})
+    return canonical_hash(
+        {
+            "trace_id": trace["trace_id"],
+            "judge_model": model,
+            "policy": GRADE_POLICY_VERSION,
+        }
+    )
+
+
+def current_grades(grades: list[dict], judge_model: str | None = None) -> list[dict]:
+    """Select one current-policy grade per trace/judge, preferring canonical IDs."""
+    grouped = {}
+    for grade in grades:
+        model = (grade.get("judge") or {}).get("model")
+        trace_id = grade.get("trace_id")
+        if (
+            grade.get("policy_version") != GRADE_POLICY_VERSION
+            or not isinstance(model, str)
+            or not isinstance(trace_id, str)
+            or (judge_model is not None and model != judge_model)
+        ):
+            continue
+        grouped.setdefault((trace_id, model), []).append(grade)
+    selected = []
+    for (trace_id, model), options in grouped.items():
+        expected_id = grade_id_for({"trace_id": trace_id}, model)
+        canonical = [row for row in options if row.get("grade_id") == expected_id]
+        choices = canonical or options
+        if len(choices) > 1:
+            raise GradeError(
+                f"multiple current grades for trace {trace_id} and judge {model}"
+            )
+        selected.append(choices[0])
+    return selected
 
 
 def _parse_object(text: str) -> dict:
@@ -235,20 +268,11 @@ def run_grading(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     errors_path = errors_path or output_path.with_suffix(".errors.jsonl")
     existing = _jsonl(output_path) if output_path.exists() else []
-    policy_changed = False
-    for row in existing:
-        trainable = _trainability(row.get("scores") or {}, row.get("message_annotations") or [])
-        if row.get("trainable") != trainable or row.get("policy_version") != GRADE_POLICY_VERSION:
-            row["trainable"] = trainable
-            row["policy_version"] = GRADE_POLICY_VERSION
-            policy_changed = True
-    if policy_changed:
-        tmp_path = output_path.with_name(output_path.name + ".tmp")
-        with tmp_path.open("w", encoding="utf-8") as output:
-            for row in existing:
-                output.write(json.dumps(row, ensure_ascii=False) + "\n")
-        tmp_path.replace(output_path)
-    done = {row.get("grade_id") for row in existing}
+    done = {
+        row.get("grade_id")
+        for row in current_grades(existing, model)
+        if row.get("grade_id") == grade_id_for(row, model)
+    }
     jobs = []
     skipped = 0
     for trace in traces:
