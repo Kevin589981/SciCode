@@ -56,7 +56,8 @@ training path that silently drops `reasoning_content`.
 
 - Canonical local repository: `D:/1/desktop/scienceIDE/SciCode`
 - Canonical branch: `scienceide-pipeline`
-- Last synchronized reasoning-factory commit: `0c1c306`
+- Reasoning-first v1 baseline commit: `0c1c306`
+- Batch v2 synchronization point: current `scienceide-pipeline` branch head
 - Active development worktree:
   `D:/1/desktop/scienceIDE/scicode-work/reasoning-factory-wt`
 - Active development branch: `feature/reasoning-trace-factory-v1`
