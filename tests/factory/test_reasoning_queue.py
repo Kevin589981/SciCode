@@ -7,10 +7,55 @@ import time
 import unittest
 from pathlib import Path
 
-from factory.reasoning.queue import QueueError, ScheduledChat, WorkQueue
+from factory.reasoning.queue import (
+    MetricsCapacityController,
+    QueueError,
+    ScheduledChat,
+    WorkQueue,
+    parse_active_requests,
+)
 
 
 class ReasoningQueueTests(unittest.TestCase):
+    def test_metrics_capacity_subtracts_local_activity_and_has_a_floor(self):
+        metrics = """# HELP ignored
+smg_worker_requests_active{worker="a"} 600
+smg_worker_requests_active{worker="b"} 900
+other_metric{worker="a"} 99
+"""
+        self.assertEqual(parse_active_requests(metrics), 1500)
+        controller = MetricsCapacityController(
+            "http://metrics.test",
+            minimum=500,
+            maximum=1792,
+            refresh_interval=30,
+            fetch_fn=lambda: metrics,
+        )
+        controller.refresh()
+        self.assertEqual(controller.limit(local_active=300), 592)
+        self.assertEqual(controller.limit(local_active=0), 500)
+
+    def test_target_claims_reserve_expected_rows_atomically(self):
+        with tempfile.TemporaryDirectory() as td:
+            queue = WorkQueue(Path(td) / "target.sqlite3")
+            for index in range(4):
+                queue.enqueue("repo", str(index), {"expected_rows": 3})
+            first = queue.claim("one", kinds=("repo",), target_rows=5)
+            second = queue.claim("two", kinds=("repo",), target_rows=5)
+            self.assertIsNotNone(first)
+            self.assertIsNotNone(second)
+            self.assertIsNone(queue.claim("three", kinds=("repo",), target_rows=5))
+            self.assertEqual(
+                queue.row_progress(kinds=("repo",)),
+                {"completed": 0, "reserved": 6},
+            )
+            queue.complete(first, {"sft_rows": 2})
+            queue.complete(second, {"sft_rows": 3})
+            self.assertEqual(
+                queue.row_progress(kinds=("repo",)),
+                {"completed": 5, "reserved": 0},
+            )
+
     def test_portable_journal_default_and_immutable_explicit_mode(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "jobs.sqlite3"

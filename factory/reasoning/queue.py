@@ -17,6 +17,7 @@ import json
 import sqlite3
 import threading
 import time
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,95 @@ class SlotLease:
     resource: str
     slot: int
     holder: str
+
+
+def parse_active_requests(metrics: str) -> int:
+    """Sum the labeled smg active-request series used by the Kimi deployment."""
+    total = 0.0
+    for line in metrics.splitlines():
+        if not line.startswith("smg_worker_requests_active{"):
+            continue
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        try:
+            value = float(fields[-1])
+        except ValueError:
+            continue
+        if value >= 0:
+            total += value
+    return max(0, int(total))
+
+
+class MetricsCapacityController:
+    """Turn deployment-wide active requests into a local admission ceiling."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        minimum: int,
+        maximum: int,
+        refresh_interval: float = 30.0,
+        timeout: float = 5.0,
+        fetch_fn=None,
+    ):
+        if not url or minimum < 1 or maximum < minimum:
+            raise QueueError("metrics URL and a valid minimum/maximum are required")
+        if refresh_interval <= 0 or timeout <= 0:
+            raise QueueError("metrics refresh interval and timeout must be positive")
+        self.url = url
+        self.minimum = minimum
+        self.maximum = maximum
+        self.refresh_interval = refresh_interval
+        self.timeout = timeout
+        self.fetch_fn = fetch_fn or self._fetch
+        self._lock = threading.Lock()
+        self._observed_total = 0
+        self._updated_monotonic = -float("inf")
+        self._last_error: str | None = None
+
+    def _fetch(self) -> str:
+        request = urllib.request.Request(
+            self.url,
+            headers={"User-Agent": "scicode-reasoning-factory"},
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+
+    def refresh(self) -> None:
+        now = time.monotonic()
+        if now - self._updated_monotonic < self.refresh_interval:
+            return
+        with self._lock:
+            now = time.monotonic()
+            if now - self._updated_monotonic < self.refresh_interval:
+                return
+            try:
+                self._observed_total = parse_active_requests(self.fetch_fn())
+                self._last_error = None
+            except Exception as exc:
+                # A missing metric must reduce throughput, never disable admission.
+                self._last_error = f"{type(exc).__name__}: {exc}"[:500]
+                self._observed_total = self.maximum
+            self._updated_monotonic = now
+
+    def limit(self, local_active: int) -> int:
+        """Reserve capacity after subtracting this queue from global activity."""
+        external_active = max(0, self._observed_total - max(0, local_active))
+        available = self.maximum - external_active
+        return max(self.minimum, min(self.maximum, available))
+
+    def snapshot(self, local_active: int = 0) -> dict:
+        return {
+            "url": self.url,
+            "observed_total": self._observed_total,
+            "local_active": max(0, local_active),
+            "limit": self.limit(local_active),
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "last_error": self._last_error,
+        }
 
 
 SCHEMA = """
@@ -243,9 +333,12 @@ class WorkQueue:
         *,
         kinds: tuple[str, ...] | None = None,
         lease_seconds: float = 14_400,
+        target_rows: int | None = None,
     ) -> JobLease | None:
         if not worker or lease_seconds <= 0:
             raise QueueError("worker must be nonempty and lease_seconds positive")
+        if target_rows is not None and target_rows < 1:
+            raise QueueError("target_rows must be positive")
         now = time.time()
         with contextlib.closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -257,6 +350,11 @@ class WorkQueue:
                     marks = ",".join("?" for _ in kinds)
                     kind_clause = f" AND kind IN ({marks})"
                     parameters.extend(kinds)
+                if target_rows is not None:
+                    progress = self._row_progress(connection, kinds=kinds)
+                    if progress["completed"] + progress["reserved"] >= target_rows:
+                        connection.execute("COMMIT")
+                        return None
                 row = connection.execute(
                     "SELECT * FROM jobs WHERE status='pending' "
                     "AND next_eligible <= ? AND attempts < max_attempts"
@@ -289,6 +387,37 @@ class WorkQueue:
             worker=worker,
             attempt=row["attempts"] + 1,
         )
+
+    @staticmethod
+    def _row_progress(
+        connection: sqlite3.Connection,
+        *,
+        kinds: tuple[str, ...] | None = None,
+    ) -> dict[str, int]:
+        parameters: list[object] = []
+        kind_clause = ""
+        if kinds:
+            marks = ",".join("?" for _ in kinds)
+            kind_clause = f" AND kind IN ({marks})"
+            parameters.extend(kinds)
+        rows = connection.execute(
+            "SELECT status,payload_json,result_json FROM jobs "
+            "WHERE status IN ('leased','done')" + kind_clause,
+            parameters,
+        ).fetchall()
+        completed = reserved = 0
+        for row in rows:
+            if row["status"] == "done" and row["result_json"]:
+                value = json.loads(row["result_json"]).get("sft_rows", 0)
+                completed += max(0, int(value or 0))
+            elif row["status"] == "leased":
+                value = json.loads(row["payload_json"]).get("expected_rows", 0)
+                reserved += max(0, int(value or 0))
+        return {"completed": completed, "reserved": reserved}
+
+    def row_progress(self, *, kinds: tuple[str, ...] | None = None) -> dict[str, int]:
+        with contextlib.closing(self._connect()) as connection:
+            return self._row_progress(connection, kinds=kinds)
 
     def renew(self, lease: JobLease, *, lease_seconds: float) -> bool:
         now = time.time()
@@ -417,6 +546,16 @@ class WorkQueue:
                 connection.execute("ROLLBACK")
                 raise
 
+    def configured_slots(self, resource: str) -> int:
+        with contextlib.closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT slot_count FROM resource_limits WHERE resource=?",
+                (resource,),
+            ).fetchone()
+        if row is None:
+            raise QueueError(f"resource {resource!r} has no configured slots")
+        return int(row["slot_count"])
+
     def acquire_slot(
         self,
         resource: str,
@@ -425,9 +564,12 @@ class WorkQueue:
         lease_seconds: float,
         wait_timeout: float = 86_400,
         poll_interval: float = 0.25,
+        capacity_controller: MetricsCapacityController | None = None,
     ) -> SlotLease:
         deadline = time.monotonic() + wait_timeout
         while True:
+            if capacity_controller is not None:
+                capacity_controller.refresh()
             now = time.time()
             with contextlib.closing(self._connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -445,11 +587,26 @@ class WorkQueue:
                         "updated_at=? WHERE resource=? AND lease_expires < ?",
                         (now, resource, now),
                     )
-                    row = connection.execute(
-                        "SELECT slot FROM resource_slots WHERE resource=? "
-                        "AND holder IS NULL ORDER BY slot LIMIT 1",
-                        (resource,),
-                    ).fetchone()
+                    active = int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM resource_slots WHERE resource=? "
+                            "AND holder IS NOT NULL",
+                            (resource,),
+                        ).fetchone()[0]
+                    )
+                    dynamic_limit = int(configured["slot_count"])
+                    if capacity_controller is not None:
+                        dynamic_limit = min(
+                            dynamic_limit,
+                            capacity_controller.limit(active),
+                        )
+                    row = None
+                    if active < dynamic_limit:
+                        row = connection.execute(
+                            "SELECT slot FROM resource_slots WHERE resource=? "
+                            "AND holder IS NULL ORDER BY slot LIMIT 1",
+                            (resource,),
+                        ).fetchone()
                     if row is not None:
                         updated = connection.execute(
                             "UPDATE resource_slots SET holder=?,lease_expires=?,"
@@ -509,6 +666,7 @@ class WorkQueue:
         *,
         lease_seconds: float,
         wait_timeout: float = 86_400,
+        capacity_controller: MetricsCapacityController | None = None,
     ):
         holder = f"{holder_prefix}:{threading.get_ident()}:{uuid.uuid4().hex[:12]}"
         lease = self.acquire_slot(
@@ -516,6 +674,7 @@ class WorkQueue:
             holder,
             lease_seconds=lease_seconds,
             wait_timeout=wait_timeout,
+            capacity_controller=capacity_controller,
         )
         stop = threading.Event()
         lost = []
@@ -583,12 +742,14 @@ class ScheduledChat:
         worker: str,
         resource: str = "llm",
         acquire_timeout: float = 86_400,
+        capacity_controller: MetricsCapacityController | None = None,
     ):
         self.queue = queue
         self.chat_fn = chat_fn
         self.worker = worker
         self.resource = resource
         self.acquire_timeout = acquire_timeout
+        self.capacity_controller = capacity_controller
 
     def __call__(self, messages, **kwargs):
         request_timeout = float(kwargs.get("timeout", 900))
@@ -597,5 +758,6 @@ class ScheduledChat:
             self.worker,
             lease_seconds=request_timeout + 300,
             wait_timeout=self.acquire_timeout,
+            capacity_controller=self.capacity_controller,
         ):
             return self.chat_fn(messages, **kwargs)

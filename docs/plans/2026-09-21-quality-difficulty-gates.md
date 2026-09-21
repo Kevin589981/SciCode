@@ -78,3 +78,13 @@ only Kimi-K3 available, plumbing and source-verification smoke tests can run,
 but panel difficulty remains `uncalibrated`, multi-judge release remains
 blocked, and human calibration remains pending until real reviewers label the
 packet. These states are represented in artifacts rather than hidden.
+
+## High-volume production policy update
+
+For the 10k production run, a single Kimi model is explicitly accepted as the
+critic, source verifier, and trace-value judge. Human and distinct-model
+calibration are not release requirements for this dataset. The output records
+`automatic_review.mode=single_model`; it must not be represented later as
+human-reviewed or model-independent. Structural depth, two exact source quotes,
+current-policy verifier acceptance, and current-policy trainable grading remain
+mandatory.

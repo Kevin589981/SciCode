@@ -269,6 +269,7 @@ class ReasoningPipelineTests(unittest.TestCase):
             self.assertEqual(first["artifacts"]["sft"]["rows"], 3)
             self.assertEqual(first["artifacts"]["grades"]["rows"], 6)
             self.assertEqual(first["models"]["judges"], ["judge", "judge-2"])
+            self.assertEqual(first["parameters"]["context_window_tokens"], 262144)
             self.assertEqual(first["parameters"]["critic_max_tokens"], 3000)
             self.assertTrue(all(
                 max_tokens == 3000
@@ -292,6 +293,7 @@ class ReasoningPipelineTests(unittest.TestCase):
             ))
             self.assertEqual(len(calls), call_count)
             self.assertEqual(second["stages"]["author"]["skipped"], 3)
+            self.assertTrue(all("automatic_review" in row for row in sft))
 
 
 if __name__ == "__main__":

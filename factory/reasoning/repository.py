@@ -365,20 +365,26 @@ def process_repository(
     judge_model: str | None = None,
     additional_judge_models: tuple[str, ...] = (),
     tasks_per_repo: int = 3,
+    min_tasks_per_repo: int = 3,
     max_mined_candidates: int = 600,
     allow_unknown_license: bool = False,
     max_tokens: int = 16384,
+    context_window_tokens: int = 262_144,
     critic_max_tokens: int = 4096,
     verifier_max_tokens: int = 4096,
     judge_max_tokens: int = 8192,
+    judge_max_input_chars: int = 160_000,
     timeout: int = 2400,
     pipeline_concurrency: int = 3,
 ) -> dict:
     """Run a resumable per-repository funnel and isolated SFT shard."""
-    if tasks_per_repo < len(ARCHETYPES):
+    if min_tasks_per_repo < len(ARCHETYPES):
         raise RepositoryError(
-            f"tasks_per_repo must be at least {len(ARCHETYPES)} for archetype coverage"
+            f"min_tasks_per_repo must be at least {len(ARCHETYPES)} for "
+            "archetype coverage"
         )
+    if tasks_per_repo < min_tasks_per_repo:
+        raise RepositoryError("tasks_per_repo must be >= min_tasks_per_repo")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / "repository_report.json"
@@ -470,11 +476,11 @@ def process_repository(
         limit=tasks_per_repo,
     )
     _write_jsonl(selected_path, selected)
-    if len(selected) < tasks_per_repo:
+    if len(selected) < min_tasks_per_repo:
         report = {
             "schema_version": REPORT_SCHEMA,
             "status": "rejected",
-            "reason": "insufficient_dual_evidence_candidates",
+            "reason": "insufficient_minimum_dual_evidence_candidates",
             "repository": candidate,
             "commit": commit,
             "profile": profile,
@@ -506,11 +512,13 @@ def process_repository(
         solver_model=solver_model,
         judge_model=judge_model,
         additional_judge_models=additional_judge_models,
-        limit=tasks_per_repo,
+        limit=len(selected),
         max_tokens=max_tokens,
+        context_window_tokens=context_window_tokens,
         critic_max_tokens=critic_max_tokens,
         verifier_max_tokens=verifier_max_tokens,
         judge_max_tokens=judge_max_tokens,
+        judge_max_input_chars=judge_max_input_chars,
         timeout=timeout,
         concurrency=pipeline_concurrency,
     )

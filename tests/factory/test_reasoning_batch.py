@@ -27,7 +27,10 @@ def sft_row(index):
     return {
         "schema_version": "scicode-reasoning-sft-v1",
         "trace_id": f"trace-{index}",
+        "task_name": f"task-{index}",
+        "task_hash": f"hash-{index}",
         "messages": [{"role": "assistant", "reasoning_content": f"r{index}"}],
+        "automatic_review": {"mode": "single_model"},
     }
 
 
@@ -82,7 +85,9 @@ class ReasoningBatchTests(unittest.TestCase):
             report = aggregate_sft(queue, output)
             rows = [json.loads(line) for line in output.read_text().splitlines()]
             self.assertEqual(report["sft_rows"], 12)
-            self.assertEqual(report["quality_status"], "candidate_unreleased")
+            self.assertEqual(
+                report["quality_status"], "automatic_single_model_reviewed"
+            )
             self.assertEqual(report["quality_inputs"]["tasks"]["rows"], 12)
             self.assertEqual(
                 [row["trace_id"] for row in rows],
@@ -96,6 +101,47 @@ class ReasoningBatchTests(unittest.TestCase):
             queue.enqueue("reasoning_repository", "pending", repository(1))
             with self.assertRaisesRegex(Exception, "unfinished"):
                 aggregate_sft(queue, root / "sft.jsonl")
+
+    def test_target_stops_claiming_and_aggregates_exactly_requested_rows(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            queue = WorkQueue(root / "batch.sqlite3")
+            catalog = root / "catalog.jsonl"
+            catalog.write_text(
+                "".join(json.dumps(repository(i)) + "\n" for i in range(8)),
+                encoding="utf-8",
+            )
+            enqueue_catalog(queue, catalog, recipe={"tasks_per_repo": 2})
+
+            def factory(_worker):
+                def process(lease):
+                    index = int(lease.payload["repository"]["repo_id"])
+                    shard = root / "target-shards" / lease.job_id
+                    shard.mkdir(parents=True)
+                    sft = shard / "sft.jsonl"
+                    sft.write_text(json.dumps(sft_row(index)) + "\n", encoding="utf-8")
+                    return {
+                        "status": "complete",
+                        "sft": str(sft),
+                        "sft_rows": 1,
+                        "artifacts": {},
+                    }
+
+                return process
+
+            run_local_workers(
+                queue,
+                workers=4,
+                processor_factory=factory,
+                target_sft_rows=3,
+            )
+            report = aggregate_sft(
+                queue,
+                root / "accepted.jsonl",
+                target_sft_rows=3,
+            )
+            self.assertEqual(report["sft_rows"], 3)
+            self.assertGreater(queue.counts().get("pending", 0), 0)
 
 
 if __name__ == "__main__":

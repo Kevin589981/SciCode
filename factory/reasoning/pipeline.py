@@ -53,9 +53,11 @@ def run_pipeline(
     author_temperature: float = 0.3,
     solver_temperature: float = 0.7,
     max_tokens: int = 16384,
+    context_window_tokens: int = 262_144,
     critic_max_tokens: int = 4096,
     verifier_max_tokens: int = 4096,
     judge_max_tokens: int = 8192,
+    judge_max_input_chars: int = 160_000,
     timeout: int = 2400,
     concurrency: int = 3,
     author_attempts: int = 2,
@@ -63,6 +65,13 @@ def run_pipeline(
     inline_thinking: bool = False,
 ) -> dict:
     """Run the v1 vertical slice and write an auditable manifest."""
+    if context_window_tokens < 1 or max_tokens >= context_window_tokens:
+        raise ValueError("max_tokens must be smaller than context_window_tokens")
+    estimated_judge_input_tokens = (judge_max_input_chars + 3) // 4
+    if estimated_judge_input_tokens + judge_max_tokens > context_window_tokens:
+        raise ValueError(
+            "judge input/output budgets exceed the configured context window"
+        )
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
@@ -144,6 +153,7 @@ def run_pipeline(
             chat_fn=chat_fn,
             model=active_judge,
             max_tokens=judge_max_tokens,
+            max_input_chars=judge_max_input_chars,
             timeout=timeout,
             concurrency=concurrency,
         )
@@ -189,9 +199,11 @@ def run_pipeline(
             "author_temperature": author_temperature,
             "solver_temperature": solver_temperature,
             "max_tokens": max_tokens,
+            "context_window_tokens": context_window_tokens,
             "critic_max_tokens": critic_max_tokens,
             "verifier_max_tokens": verifier_max_tokens,
             "judge_max_tokens": judge_max_tokens,
+            "judge_max_input_chars": judge_max_input_chars,
             "timeout": timeout,
             "concurrency": concurrency,
             "author_attempts": author_attempts,
@@ -235,9 +247,11 @@ def main() -> None:
     parser.add_argument("--author-temperature", type=float, default=0.3)
     parser.add_argument("--solver-temperature", type=float, default=0.7)
     parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--context-window-tokens", type=int, default=262_144)
     parser.add_argument("--critic-max-tokens", type=int, default=4096)
     parser.add_argument("--verifier-max-tokens", type=int, default=4096)
     parser.add_argument("--judge-max-tokens", type=int, default=8192)
+    parser.add_argument("--judge-max-input-chars", type=int, default=160_000)
     parser.add_argument("--timeout", type=int, default=2400)
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--author-attempts", type=int, default=2)
@@ -258,9 +272,11 @@ def main() -> None:
         author_temperature=args.author_temperature,
         solver_temperature=args.solver_temperature,
         max_tokens=args.max_tokens,
+        context_window_tokens=args.context_window_tokens,
         critic_max_tokens=args.critic_max_tokens,
         verifier_max_tokens=args.verifier_max_tokens,
         judge_max_tokens=args.judge_max_tokens,
+        judge_max_input_chars=args.judge_max_input_chars,
         timeout=args.timeout,
         concurrency=args.concurrency,
         author_attempts=args.author_attempts,

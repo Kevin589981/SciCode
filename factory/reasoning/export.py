@@ -7,12 +7,13 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from .grade import GradeError, current_grades
+from .grade import GRADE_POLICY_VERSION, GradeError, current_grades
 from .preflight import PREFLIGHT_POLICY
 from .schema import validate_grade, validate_task, validate_trace
 from .verify import VERIFICATION_POLICY
 
 SFT_SCHEMA = "scicode-reasoning-sft-v1"
+AUTOMATIC_REVIEW_POLICY = "automatic-scientific-review-v1"
 
 
 class ExportError(ValueError):
@@ -135,8 +136,9 @@ def _sft_row(
     grade: dict,
     *,
     inline_thinking: bool,
+    automatic_review: dict | None = None,
 ) -> dict:
-    return {
+    row = {
         "schema_version": SFT_SCHEMA,
         "task_name": task["task_id"],
         "trace_id": trace["trace_id"],
@@ -159,6 +161,9 @@ def _sft_row(
             "grade_id": grade.get("grade_id"),
         },
     }
+    if automatic_review is not None:
+        row["automatic_review"] = automatic_review
+    return row
 
 
 def export_sft(
@@ -196,6 +201,28 @@ def export_sft(
     archetypes = Counter()
     outcomes = Counter()
     selected_rows = []
+    automatic_review = None
+    if all(
+        (
+            judge_model,
+            preflight_path,
+            verification_path,
+            preflight_model,
+            verifier_model,
+        )
+    ):
+        models = [preflight_model, verifier_model, judge_model]
+        automatic_review = {
+            "policy_version": AUTOMATIC_REVIEW_POLICY,
+            "mode": "single_model" if len(set(models)) == 1 else "model_panel",
+            "human_review_required": False,
+            "critic": {"model": preflight_model, "policy": PREFLIGHT_POLICY},
+            "verifier": {
+                "model": verifier_model,
+                "policy": VERIFICATION_POLICY,
+            },
+            "judge": {"model": judge_model, "policy": GRADE_POLICY_VERSION},
+        }
     for trace in sorted(traces, key=lambda row: row["trace_id"]):
         task = tasks.get(trace["task_id"])
         if task is None:
@@ -214,7 +241,13 @@ def export_sft(
             outcomes[f"rejected:{status}"] += 1
             archetypes[f"rejected:{task['archetype']}"] += 1
             continue
-        row = _sft_row(task, trace, grade, inline_thinking=inline_thinking)
+        row = _sft_row(
+            task,
+            trace,
+            grade,
+            inline_thinking=inline_thinking,
+            automatic_review=automatic_review,
+        )
         selected_rows.append(row)
         counts["selected"] += 1
         outcomes[f"selected:{status}"] += 1
@@ -232,6 +265,13 @@ def export_sft(
         "not_admitted": counts["not_admitted"],
         "inline_thinking": inline_thinking,
         "judge_model": judge_model,
+        "quality_status": (
+            "automatic_single_model_reviewed"
+            if automatic_review and automatic_review["mode"] == "single_model"
+            else "automatic_model_panel_reviewed"
+            if automatic_review
+            else "unreviewed_export"
+        ),
         "by_archetype": dict(sorted(archetypes.items())),
         "by_outcome": dict(sorted(outcomes.items())),
         "output": str(output_path),

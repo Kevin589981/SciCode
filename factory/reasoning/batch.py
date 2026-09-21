@@ -23,7 +23,13 @@ from .discovery import (
     resolve_github_token,
     write_catalog,
 )
-from .queue import JobLease, LeaseHeartbeat, ScheduledChat, WorkQueue
+from .queue import (
+    JobLease,
+    LeaseHeartbeat,
+    MetricsCapacityController,
+    ScheduledChat,
+    WorkQueue,
+)
 from .repository import process_repository, safe_slug
 from .rollout import current_commit
 
@@ -87,7 +93,11 @@ def enqueue_catalog(
         _job_id, inserted = queue.enqueue(
             JOB_KIND,
             key,
-            {"repository": candidate, "recipe": recipe},
+            {
+                "repository": candidate,
+                "recipe": recipe,
+                "expected_rows": int(recipe.get("tasks_per_repo", 3)),
+            },
             priority=int(candidate.get("stars") or 0),
             max_attempts=max_attempts,
         )
@@ -109,6 +119,7 @@ def process_lease(
     output_root: Path,
     chat_fn=llm.chat,
     job_lease_seconds: float = 14_400,
+    capacity_controller: MetricsCapacityController | None = None,
 ) -> dict:
     """Process one leased repository under global repo and model budgets."""
     candidate = lease.payload.get("repository", lease.payload)
@@ -129,6 +140,7 @@ def process_lease(
         queue,
         chat_fn,
         worker=lease.worker,
+        capacity_controller=capacity_controller,
     )
     repo_resource = f"repo:{candidate['repo_id']}"
     queue.configure_slots(repo_resource, 1)
@@ -158,12 +170,19 @@ def process_lease(
                     recipe.get("additional_judge_models") or ()
                 ),
                 tasks_per_repo=int(recipe.get("tasks_per_repo", 3)),
+                min_tasks_per_repo=int(recipe.get("min_tasks_per_repo", 3)),
                 max_mined_candidates=int(recipe.get("max_mined_candidates", 600)),
                 allow_unknown_license=bool(recipe.get("allow_unknown_license", False)),
                 max_tokens=int(recipe.get("max_tokens", 16384)),
+                context_window_tokens=int(
+                    recipe.get("context_window_tokens", 262_144)
+                ),
                 critic_max_tokens=int(recipe.get("critic_max_tokens", 4096)),
                 verifier_max_tokens=int(recipe.get("verifier_max_tokens", 4096)),
                 judge_max_tokens=int(recipe.get("judge_max_tokens", 8192)),
+                judge_max_input_chars=int(
+                    recipe.get("judge_max_input_chars", 160_000)
+                ),
                 timeout=int(recipe.get("timeout", 2400)),
                 pipeline_concurrency=int(recipe.get("pipeline_concurrency", 3)),
             )
@@ -175,6 +194,7 @@ def process_lease(
         "sft": report.get("sft"),
         "candidate_sft": report.get("candidate_sft") or report.get("sft"),
         "sft_rows": report.get("sft_rows", 0),
+        "selected_source_candidates": report.get("selected", 0),
         "artifacts": report.get("artifacts") or {},
         "commit": report.get("commit"),
     }
@@ -189,6 +209,7 @@ def worker_loop(
     idle_interval: float = 1.0,
     max_jobs: int | None = None,
     job_lease_seconds: float = 14_400,
+    target_sft_rows: int | None = None,
 ) -> dict:
     counts = {"completed": 0, "retried": 0, "failed": 0}
     handled = 0
@@ -197,8 +218,13 @@ def worker_loop(
             worker,
             kinds=(JOB_KIND,),
             lease_seconds=job_lease_seconds,
+            target_rows=target_sft_rows,
         )
         if lease is None:
+            progress = queue.row_progress(kinds=(JOB_KIND,))
+            if target_sft_rows is not None and progress["completed"] >= target_sft_rows:
+                counts["target_reached"] = progress["completed"]
+                break
             states = queue.counts()
             if watch and (states.get("pending", 0) or states.get("leased", 0)):
                 time.sleep(idle_interval)
@@ -227,6 +253,7 @@ def run_local_workers(
     workers: int,
     processor_factory,
     job_lease_seconds: float = 14_400,
+    target_sft_rows: int | None = None,
 ) -> list[dict]:
     if workers < 1:
         raise BatchError("workers must be positive")
@@ -240,6 +267,7 @@ def run_local_workers(
             processor=processor_factory(worker),
             watch=True,
             job_lease_seconds=job_lease_seconds,
+            target_sft_rows=target_sft_rows,
         )
 
     with futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -252,10 +280,13 @@ def aggregate_sft(
     *,
     report_path: Path | None = None,
     allow_incomplete: bool = False,
+    target_sft_rows: int | None = None,
 ) -> dict:
+    if target_sft_rows is not None and target_sft_rows < 1:
+        raise BatchError("target_sft_rows must be positive")
     states = queue.counts()
     unfinished = states.get("pending", 0) + states.get("leased", 0)
-    if unfinished and not allow_incomplete:
+    if unfinished and not allow_incomplete and target_sft_rows is None:
         raise BatchError(f"refusing to aggregate with {unfinished} unfinished jobs")
     rows_by_trace = {}
     companion_specs = {
@@ -267,10 +298,14 @@ def aggregate_sft(
     }
     companion_rows = {name: {} for name in companion_specs}
     repositories = {"complete": 0, "rejected": 0, "missing": 0}
+    selected_source_candidates = 0
     for item in queue.completed_results(JOB_KIND):
         result = item["result"]
         status = result.get("status")
         repositories[status if status in repositories else "missing"] += 1
+        selected_source_candidates += int(
+            result.get("selected_source_candidates") or 0
+        )
         sft_path = result.get("sft")
         if status != "complete" or not sft_path:
             continue
@@ -303,6 +338,39 @@ def aggregate_sft(
                 if previous is not None and previous != row:
                     raise BatchError(f"conflicting {name} rows for {identity}")
                 companion_rows[name][identity] = row
+    discovered_sft_rows = len(rows_by_trace)
+    if target_sft_rows is not None:
+        if discovered_sft_rows < target_sft_rows and not allow_incomplete:
+            raise BatchError(
+                f"target requires {target_sft_rows} SFT rows, only "
+                f"{discovered_sft_rows} completed"
+            )
+        keep = set(sorted(rows_by_trace)[:target_sft_rows])
+        rows_by_trace = {
+            trace_id: row
+            for trace_id, row in rows_by_trace.items()
+            if trace_id in keep
+        }
+        task_ids = {row.get("task_name") for row in rows_by_trace.values()}
+        task_hashes = {row.get("task_hash") for row in rows_by_trace.values()}
+        companion_rows["tasks"] = {
+            key: row
+            for key, row in companion_rows["tasks"].items()
+            if row.get("task_id") in task_ids
+        }
+        for name in ("traces", "grades"):
+            companion_rows[name] = {
+                key: row
+                for key, row in companion_rows[name].items()
+                if row.get("trace_id") in keep
+            }
+        for name in ("preflight", "verification"):
+            companion_rows[name] = {
+                key: row
+                for key, row in companion_rows[name].items()
+                if row.get("task_hash") in task_hashes
+            }
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(output_path.name + ".tmp")
@@ -320,13 +388,39 @@ def aggregate_sft(
         temporary.replace(path)
         companion_artifacts[name] = {"path": str(path), "rows": len(rows)}
     digest = hashlib.sha256(output_path.read_bytes()).hexdigest()
+    review_modes = {
+        (row.get("automatic_review") or {}).get("mode")
+        for row in rows_by_trace.values()
+    }
+    if rows_by_trace and review_modes == {"single_model"}:
+        quality_status = "automatic_single_model_reviewed"
+    elif rows_by_trace and None not in review_modes:
+        quality_status = "automatic_model_panel_reviewed"
+    else:
+        quality_status = "unreviewed_or_mixed"
     report = {
         "schema_version": BATCH_SCHEMA,
         "queue_db": str(queue.path.resolve()),
         "queue": states,
         "repositories": repositories,
         "sft_rows": len(rows_by_trace),
-        "quality_status": "candidate_unreleased",
+        "discovered_sft_rows": discovered_sft_rows,
+        "target_sft_rows": target_sft_rows,
+        "quality_status": quality_status,
+        "production_yield": {
+            "selected_source_candidates": selected_source_candidates,
+            "accepted_sft_rows_before_target_trim": discovered_sft_rows,
+            "accepted_fraction": (
+                round(discovered_sft_rows / selected_source_candidates, 6)
+                if selected_source_candidates
+                else None
+            ),
+            "mean_accepted_rows_per_complete_repository": (
+                round(discovered_sft_rows / repositories["complete"], 6)
+                if repositories["complete"]
+                else None
+            ),
+        },
         "quality_inputs": companion_artifacts,
         "sft": str(output_path),
         "sha256": digest,
@@ -351,6 +445,11 @@ def _worker_options(
         parser.add_argument("--cache-root", type=Path, required=True)
         parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--job-lease-seconds", type=float, default=14_400)
+    parser.add_argument("--target-sft-rows", type=int)
+    parser.add_argument("--llm-metrics-url")
+    parser.add_argument("--llm-min-slots", type=int, default=1)
+    parser.add_argument("--metrics-poll-seconds", type=float, default=30.0)
+    parser.add_argument("--metrics-timeout", type=float, default=5.0)
 
 
 def _recipe_options(parser: argparse.ArgumentParser) -> None:
@@ -362,12 +461,15 @@ def _recipe_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--judge-model")
     parser.add_argument("--additional-judge-model", action="append", default=[])
     parser.add_argument("--tasks-per-repo", type=int, default=3)
+    parser.add_argument("--min-tasks-per-repo", type=int, default=3)
     parser.add_argument("--max-mined-candidates", type=int, default=600)
     parser.add_argument("--allow-unknown-license", action="store_true")
     parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--context-window-tokens", type=int, default=262_144)
     parser.add_argument("--critic-max-tokens", type=int, default=4096)
     parser.add_argument("--verifier-max-tokens", type=int, default=4096)
     parser.add_argument("--judge-max-tokens", type=int, default=8192)
+    parser.add_argument("--judge-max-input-chars", type=int, default=160_000)
     parser.add_argument("--timeout", type=int, default=2400)
     parser.add_argument("--pipeline-concurrency", type=int, default=3)
 
@@ -384,24 +486,47 @@ def recipe_from_args(args) -> dict:
         "judge_model": args.judge_model,
         "additional_judge_models": args.additional_judge_model,
         "tasks_per_repo": args.tasks_per_repo,
+        "min_tasks_per_repo": args.min_tasks_per_repo,
         "max_mined_candidates": args.max_mined_candidates,
         "allow_unknown_license": args.allow_unknown_license,
         "max_tokens": args.max_tokens,
+        "context_window_tokens": args.context_window_tokens,
         "critic_max_tokens": args.critic_max_tokens,
         "verifier_max_tokens": args.verifier_max_tokens,
         "judge_max_tokens": args.judge_max_tokens,
+        "judge_max_input_chars": args.judge_max_input_chars,
         "timeout": args.timeout,
         "pipeline_concurrency": args.pipeline_concurrency,
     }
 
 
-def _processor(queue: WorkQueue, args, worker: str):
+def _capacity_controller(args, *, maximum: int) -> MetricsCapacityController | None:
+    if not args.llm_metrics_url:
+        return None
+    if args.llm_min_slots > maximum:
+        raise BatchError("llm_min_slots cannot exceed llm_slots")
+    return MetricsCapacityController(
+        args.llm_metrics_url,
+        minimum=args.llm_min_slots,
+        maximum=maximum,
+        refresh_interval=args.metrics_poll_seconds,
+        timeout=args.metrics_timeout,
+    )
+
+
+def _processor(
+    queue: WorkQueue,
+    args,
+    worker: str,
+    capacity_controller: MetricsCapacityController | None = None,
+):
     return lambda lease: process_lease(
         queue,
         lease,
         cache_root=args.cache_root.resolve(),
         output_root=args.output_root.resolve(),
         job_lease_seconds=args.job_lease_seconds,
+        capacity_controller=capacity_controller,
     )
 
 
@@ -437,6 +562,7 @@ def main() -> None:
     aggregate_parser.add_argument("--out", type=Path, required=True)
     aggregate_parser.add_argument("--report", type=Path)
     aggregate_parser.add_argument("--allow-incomplete", action="store_true")
+    aggregate_parser.add_argument("--target-sft-rows", type=int)
 
     auto_parser = subparsers.add_parser("auto")
     auto_parser.add_argument("--output-root", type=Path, required=True)
@@ -485,6 +611,7 @@ def main() -> None:
             args.out,
             report_path=args.report,
             allow_incomplete=args.allow_incomplete,
+            target_sft_rows=args.target_sft_rows,
         )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return
@@ -503,13 +630,16 @@ def main() -> None:
     if args.command == "worker":
         queue = WorkQueue(args.db)
         worker = args.worker or f"{socket.gethostname()}:{os.getpid()}"
+        llm_slots = queue.configured_slots("llm")
+        capacity_controller = _capacity_controller(args, maximum=llm_slots)
         result = worker_loop(
             queue,
             worker=worker,
-            processor=_processor(queue, args, worker),
+            processor=_processor(queue, args, worker, capacity_controller),
             watch=not args.no_watch,
             max_jobs=args.max_jobs,
             job_lease_seconds=args.job_lease_seconds,
+            target_sft_rows=args.target_sft_rows,
         )
         print(json.dumps({**result, "queue": queue.counts()}, indent=2))
         return
@@ -569,13 +699,21 @@ def main() -> None:
         max_attempts=args.max_attempts,
         recipe=recipe_from_args(args),
     )
+    capacity_controller = _capacity_controller(args, maximum=args.llm_slots)
     worker_results = run_local_workers(
         queue,
         workers=args.workers,
-        processor_factory=lambda worker: _processor(queue, args, worker),
+        processor_factory=lambda worker: _processor(
+            queue, args, worker, capacity_controller
+        ),
         job_lease_seconds=args.job_lease_seconds,
+        target_sft_rows=args.target_sft_rows,
     )
-    report = aggregate_sft(queue, output_root / "candidate-sft.jsonl")
+    report = aggregate_sft(
+        queue,
+        output_root / "accepted-sft.jsonl",
+        target_sft_rows=args.target_sft_rows,
+    )
     print(
         json.dumps(
             {
@@ -585,6 +723,11 @@ def main() -> None:
                 "enqueue": enqueue_result,
                 "workers": worker_results,
                 "aggregate": report,
+                "llm_capacity": (
+                    capacity_controller.snapshot()
+                    if capacity_controller is not None
+                    else {"mode": "static", "limit": args.llm_slots}
+                ),
             },
             ensure_ascii=False,
             indent=2,

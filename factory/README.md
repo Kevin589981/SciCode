@@ -114,7 +114,7 @@ The vertical pipeline is:
 ```
 mined source -> heterogeneous task authoring -> reasoning-depth preflight
              -> exact-source scientific verification -> native-thinking rollout
-             -> multi-judge outcome-independent grading -> candidate SFT
+             -> outcome-independent Kimi grading -> automatically reviewed SFT
 ```
 
 Run the complete pipeline with one source candidate per archetype:
@@ -148,7 +148,7 @@ The primary files are:
 | `verification.jsonl` | source-grounded validity, answerability, and shortcut gate |
 | `traces.jsonl` | verbatim messages, including native `reasoning_content` |
 | `grades.jsonl` | scientific trace-value scores and per-message loss policy |
-| `sft.jsonl` | candidate training records with separate reasoning/content masks |
+| `sft.jsonl` | automatically reviewed training records with separate reasoning/content masks |
 | `run_manifest.json` | code, model, parameter, input, and artifact hashes |
 
 `sft.jsonl` selection is controlled by reasoning quality, not `reward == 1`.
@@ -161,9 +161,16 @@ Admission and grading resume identities include their policy versions; changing
 a rubric therefore triggers fresh decisions instead of relabeling old model
 outputs as if they had been produced under the new policy.
 
-### Difficulty calibration and quality release
+For high-volume production, one Kimi model may fill the critic, verifier, and
+judge roles. A selected row records `automatic_review.mode=single_model` and is
+usable directly: it has passed current-policy reasoning-depth admission,
+exact-source verification, and trace-value grading. This is model review, not a
+claim of independent human or multi-model agreement.
 
-Candidate SFT is not release SFT. `factory.reasoning.difficulty` measures task
+### Optional independent calibration
+
+The automatic Kimi path does not require human review. For smaller, independently
+audited releases, `factory.reasoning.difficulty` can additionally measure task
 difficulty with multiple named solver models and repeated attempts. A separate
 evaluator scores whether each response actually solved the task; this is kept
 separate from trace training-value grading. At least two distinct solver model
@@ -214,8 +221,9 @@ python -m factory.reasoning.quality release \
   --out .work/release-sft.jsonl
 ```
 
-Release fails closed unless the human calibration belongs to the exact trace
-population and passes its thresholds. By default, each released row must also
+This optional stricter release fails closed unless the human calibration
+belongs to the exact trace population and passes its thresholds. By default,
+each released row must also
 have a calibrated `medium`/`hard` band, an author-independent source verifier,
 and agreement from at least two solver-independent judge model IDs. Repeating
 the same model under different aliases does not count as independence.
@@ -253,6 +261,50 @@ python -m factory.reasoning.batch auto \
   --solver-model Kimi-K3 --judge-model Kimi-K3
 ```
 
+One repository contributes between zero and `--tasks-per-repo` accepted rows.
+The default ceiling is three. Production can raise it (the prepared 10k recipe
+uses 16), while `--min-tasks-per-repo 3` prevents a repository with only 3–15
+good source candidates from being discarded merely because it cannot fill the
+ceiling. The batch report records accepted rows per completed repository and the
+accepted/selected fraction; no fixed useful-row yield is assumed in advance.
+
+The prepared 10k launcher is inert unless explicitly armed:
+
+```bash
+# Prints the configuration and exits; does not start work.
+bash factory/reasoning/run_10k_kimi.sh
+
+# Explicit production start.
+bash factory/reasoning/run_10k_kimi.sh --execute
+```
+
+It uses a 262144-token context-window contract, a 65536-token solver/author
+output ceiling, 500 repository workers, and an exact 10000-row aggregation
+target. `max_tokens` is an output limit, not the model context length; the
+separate `--context-window-tokens` value validates the judge input/output
+budget. The launcher does not start automatically when installed or tested.
+
+LLM admission is deployment-aware. Every 30 seconds the controller reads
+`http://10.100.184.127:29000/metrics`, equivalent to:
+
+```bash
+curl -s http://10.100.184.127:29000/metrics | \
+  awk '/^smg_worker_requests_active{/{n += $NF} END{print n}'
+```
+
+It estimates external traffic as `deployment active - this queue's active
+leases`, then clamps this queue's dynamic capacity to 500–1792. The SQLite
+transaction checks the dynamic limit while acquiring each request slot, so 500
+workers cannot race and each allocate the whole deployment budget. If metrics
+are unavailable, capacity falls back to 500 rather than running unbounded.
+
+The 10000-row target is also enforced transactionally. A leased repository
+reserves its configured maximum contribution; workers pause when completed plus
+reserved rows cover the target and resume if rejected gates release that
+reservation. Aggregation trims the final at-most-one-repository overshoot
+deterministically and writes exactly 10000 rows with matching companion
+artifacts.
+
 For production, discovery/enqueue, workers, status, and aggregation can be run
 separately:
 
@@ -273,7 +325,7 @@ python -m factory.reasoning.batch worker \
   --output-root .work/reasoning-batch
 
 python -m factory.reasoning.batch aggregate \
-  --db .work/batch.sqlite3 --out .work/reasoning-batch/candidate-sft.jsonl
+  --db .work/batch.sqlite3 --out .work/reasoning-batch/accepted-sft.jsonl
 ```
 
 The queue uses SQLite transactions, atomic job leases, job/resource heartbeats,
@@ -319,9 +371,10 @@ Environment variables:
 * Demo: two hand-written proposals over scipy `inconsistent` / `vq` pass all
   gates (`seeds-demo/`); the LLM proposal stage only scales once an endpoint
   is configured.
-* Model judges remain fallible. The release command therefore requires a human
-  calibration artifact tied to the exact trace population; a missing or failed
-  calibration cannot be bypassed by an ordinary release invocation.
+* Model judges remain fallible. At scale the selected SFT rows therefore retain
+  the exact critic/verifier/judge models and policy versions. Human/multi-model
+  calibration remains available as an optional stricter release path rather
+  than a production requirement.
 * Batch discovery uses a curated vocabulary plus optional model expansion. The
   current dual-evidence function ranker is lexical, intentionally cheap and
   auditable. Its output is subsequently checked by the source-grounded

@@ -157,10 +157,10 @@ Quality/difficulty v3 is implemented, pushed, and synchronized to `yicloud`:
   defines candidate-SFT masks;
 - named-solver panels report Wilson intervals and require multiple distinct
   model IDs/trials; zero solve rate is `unresolved`, not `hard`;
-- deterministic stratified human-audit packets and calibration metrics cover
+- optional deterministic stratified human-audit packets and calibration metrics cover
   precision, recall, agreement, critical errors, scientific depth, and trace
   value;
-- release SFT fails closed without population-matched human approval,
+- the optional independent release path fails closed without population-matched human approval,
   calibrated medium/hard difficulty, source verification, and multi-judge
   consensus;
 - candidate export recomputes the current preflight/verifier intersection, so
@@ -186,9 +186,31 @@ The live Kimi smoke in `data-reasoning-smoke-v1/` exercised these boundaries:
 - empty human reviews produce `release_approved: false`, and the release
   command exits with `human calibration has not approved release`.
 
-The remaining evidence is deliberately external: real human labels and a
-genuinely distinct solver/evaluator/judge panel. They must not be simulated
-with repeated Kimi aliases.
+The production policy was subsequently changed to permit one Kimi model to act
+as critic, source verifier, and trace-value judge. A selected `sft.jsonl` row is
+now marked `automatic_review.mode=single_model` and is directly usable without
+human review after all three current-policy gates pass. The human/multi-model
+path remains available only as an optional stricter audit.
+
+The prepared 10k batch path is implemented but has not been started:
+
+- a repository may contribute 3 through a configurable ceiling of source
+  candidates rather than being discarded whenever it cannot fill the ceiling;
+- the production recipe uses a ceiling of 16 and records actual accepted rows
+  per repository and gate yield, so useful sample count is measured rather
+  than assumed;
+- 500 repository workers feed a queue-global Kimi request budget;
+- deployment metrics are sampled every 30 seconds and the local request limit
+  is adjusted between 500 and 1792 after subtracting this queue's active leases;
+- metrics failure conservatively falls back to 500 concurrent admissions;
+- repository jobs reserve their maximum possible SFT contribution atomically,
+  stop being claimed when completed plus reserved rows cover 10000, and final
+  aggregation deterministically trims to exactly 10000 matching rows/artifacts;
+- the run contract records a 262144-token context window; solver/author output
+  remains separately bounded at 65536 tokens and judge input at 900000
+  characters (approximately 225k tokens);
+- `factory/reasoning/run_10k_kimi.sh` is inert without `--execute`, preventing
+  an accidental production launch.
 
 ## Smoke Endpoint
 
