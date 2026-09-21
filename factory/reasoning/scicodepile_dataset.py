@@ -53,8 +53,11 @@ def safe_relative_path(value: object) -> str | None:
 def _connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA journal_mode=WAL")
+    # The production workspace may be a shared filesystem where WAL locking is
+    # unsupported.  A rollback journal is slower but portable and resumable.
+    connection.execute("PRAGMA journal_mode=DELETE")
     connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute("PRAGMA temp_store=MEMORY")
     connection.executescript(
         """
         CREATE TABLE IF NOT EXISTS metadata (
