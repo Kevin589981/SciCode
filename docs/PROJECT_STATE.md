@@ -143,11 +143,14 @@ Batch production v2 is implemented locally:
 - queue-global LLM/repository slots plus a per-repository mutex;
 - fixed-schema repository screening, license gate, AST mining, and
   repository-intent × code-evidence ranking;
+- repository screening prefers a retained README, but falls back to bounded,
+  path-labelled Python source excerpts because cleaned SciCodePile snapshots
+  commonly omit repository documentation;
 - job identity over source snapshot and canonical production recipe;
 - isolated repository/job artifact shards and deterministic atomic aggregation;
 - split enqueue/worker/status/aggregate commands and a bounded `auto` command.
 
-Offline verification currently passes 67 factory tests. The v2 commits
+Offline verification currently passes 69 factory tests. The v2 commits
 have been pushed and the `yicloud` checkout kept synchronized. A bounded live
 GitHub smoke resolved exact SHAs with no API errors; after the high-precision
 scope and documentation filters were applied, `CURENT/andes` was the leading
@@ -224,6 +227,12 @@ The prepared 10k recipe allocates 3,600 repository slots to cleaned
 SciCodePile snapshots and 400 to the legacy keyword/GitHub channel. The
 SciCodePile preparation download/index/extraction is a separate resumable step;
 it does not start the Kimi production batch.
+
+Full preparation of the pinned 83.7GB dataset was started on `yicloud` on
+2026-09-21. Its durable paths are `.cache/scicodepile/raw`,
+`.cache/scicodepile/prepared`, `.cache/scicodepile/catalog.jsonl`, and
+`.cache/scicodepile/prepare.log`. This preparation directly consumes the
+cleaned file rows; it never turns their repository names into GitHub clones.
 
 ## Smoke Endpoint
 
