@@ -140,6 +140,40 @@ def read_readme(root: Path, *, max_chars: int = 32_000) -> str:
     return files[0].read_text(encoding="utf-8", errors="ignore")[:max_chars]
 
 
+def read_repository_context(
+    root: Path, *, max_chars: int = 32_000, max_files: int = 12
+) -> str:
+    """Use README evidence when present, otherwise bounded cleaned-code excerpts."""
+    readme = read_readme(root, max_chars=max_chars)
+    if len(readme.strip()) >= 100:
+        return f"SOURCE: README\n\n{readme}"
+    pieces = []
+    used = 0
+    python_files = sorted(
+        path
+        for path in Path(root).rglob("*.py")
+        if path.is_file()
+        and not any(
+            part.casefold() in {".git", ".venv", "venv", "site-packages", "__pycache__"}
+            for part in path.parts
+        )
+    )
+    for path in python_files[:max_files]:
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            relative = path.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            continue
+        remaining = max_chars - used
+        if remaining <= 0:
+            break
+        header = f"\n\nSOURCE FILE: {relative}\n"
+        excerpt = (header + text[: min(4_000, remaining)])[:remaining]
+        pieces.append(excerpt)
+        used += len(excerpt)
+    return "".join(pieces).strip()
+
+
 def screen_repository(
     candidate: dict,
     readme: str,
@@ -155,7 +189,7 @@ def screen_repository(
             "schema_version": PROFILE_SCHEMA,
             "relevant": False,
             "confidence": 0,
-            "reason": "README is absent or too short for grounded screening",
+            "reason": "repository context is absent or too short for grounded screening",
             "domain_keywords": [],
             "summary": {},
             "model": model,
@@ -176,13 +210,14 @@ def screen_repository(
 
 Do not accept a repository merely because it mentions scientific terms, collects
 papers, contains only documentation, or wraps a generic AI/application stack.
-Require evidence in the README of implemented numerical, simulation, modeling,
-scientific-analysis, or domain-computation functionality.
+Require evidence in the supplied README or cleaned source excerpts of implemented
+numerical, simulation, modeling, scientific-analysis, or domain-computation
+functionality.
 
 METADATA:
 {json.dumps(metadata, ensure_ascii=False, indent=2)}
 
-README:
+REPOSITORY CONTEXT (README when retained, otherwise source excerpts):
 {readme}
 
 Return ONLY one JSON object:
@@ -465,7 +500,7 @@ def process_repository(
     else:
         profile = screen_repository(
             candidate,
-            read_readme(root),
+            read_repository_context(root),
             chat_fn=chat_fn,
             model=profile_model,
             timeout=timeout,
