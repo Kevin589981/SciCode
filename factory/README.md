@@ -241,12 +241,36 @@ curated science queries -> rate-limited GitHub metadata search -> deduplicate
   -> three-archetype reasoning pipeline -> isolated SFT shards -> aggregation
 ```
 
-Discovery defaults to a high-precision `name,description` search scope. The
-broader `name,description,readme` scope is opt-in. It rejects high-confidence
-awesome lists, curricula, paper/book lists, and other documentation collections
-from metadata before any clone or LLM call. It writes sibling rejection and
-error JSONLs and continues past individually failed queries or commit pins after
-retries are exhausted.
+Production uses the cleaned file-level
+`SciCodePile/SciCode-Domain-Code` dataset as its primary source. It reconstructs
+read-only repository snapshots directly from the published `repo_name`,
+`file_path`, `content`, and `keyword` columns; it does not turn the dataset into
+a name list and re-clone changing GitHub repositories. The older curated
+keyword GitHub search remains an explicitly bounded second channel. That
+channel defaults to high-precision `name,description` search, rejects obvious
+documentation collections before clone/LLM use, and keeps separate error and
+rejection ledgers.
+
+Prepare 3,600 primary snapshots once on a machine with sufficient disk. The
+download is pinned to the published dataset revision, resumable, and the raw
+83.7GB files are retained so indexing/extraction never redownloads them:
+
+```bash
+/root/scicode-factory-venv/bin/python -m factory.reasoning.scicodepile_dataset \
+  --raw-dir /root/ScienceIDE-workspace/SciCode/.cache/scicodepile/raw \
+  --prepared-root /root/ScienceIDE-workspace/SciCode/.cache/scicodepile/prepared \
+  --catalog /root/ScienceIDE-workspace/SciCode/.cache/scicodepile/catalog.jsonl \
+  --repository-limit 3600
+```
+
+Only repositories containing Python files are eligible because this SciCode
+factory currently mines Python ASTs. Selection is deterministic and
+round-robins the dataset's scientific keywords instead of taking the first or
+largest domains. Unsafe paths are rejected, duplicate files are content-hashed,
+and every prepared repository receives a dataset revision and snapshot hash.
+The dataset is marked Apache-2.0, but its rows do not reliably retain each
+upstream repository's license file; production therefore records the upstream
+license as unknown instead of falsely relabeling source code as Apache-2.0.
 
 A bounded one-command run is:
 
@@ -254,6 +278,9 @@ A bounded one-command run is:
 python -m factory.reasoning.batch auto \
   --output-root .work/reasoning-batch \
   --cache-root .work/repository-cache \
+  --repository-source hybrid \
+  --scicodepile-catalog .cache/scicodepile/catalog.jsonl \
+  --keyword-channel-limit 2 \
   --query-limit 3 --repository-limit 10 \
   --workers 4 --repository-slots 2 --llm-slots 3 \
   --profile-model Kimi-K3 --author-model Kimi-K3 \
@@ -375,8 +402,9 @@ Environment variables:
   the exact critic/verifier/judge models and policy versions. Human/multi-model
   calibration remains available as an optional stricter release path rather
   than a production requirement.
-* Batch discovery uses a curated vocabulary plus optional model expansion. The
-  current dual-evidence function ranker is lexical, intentionally cheap and
+* The primary corpus is SciCodePile's cleaned, revision-pinned file data. The
+  curated vocabulary plus optional model expansion is retained as channel two.
+  The current dual-evidence function ranker is lexical, intentionally cheap and
   auditable. Its output is subsequently checked by the source-grounded
   scientific verifier; embedding retrieval remains a future recall/ranking
   upgrade rather than an unrecorded quality assumption.

@@ -1,7 +1,13 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from factory.reasoning.repository import rank_candidates, screen_repository
+from factory.reasoning.repository import (
+    checkout_repository,
+    rank_candidates,
+    screen_repository,
+)
 
 
 def candidate(function, module, source, lines=30):
@@ -17,6 +23,26 @@ def candidate(function, module, source, lines=30):
 
 
 class ReasoningRepositoryTests(unittest.TestCase):
+    def test_clean_dataset_snapshot_does_not_clone_github(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "snapshot"
+            root.mkdir()
+            digest = "a" * 64
+            (root / ".scicodepile_snapshot.json").write_text(
+                json.dumps({"snapshot_hash": digest}), encoding="utf-8"
+            )
+            checkout, identity = checkout_repository(
+                {
+                    "source_kind": "scicodepile_clean_dataset",
+                    "snapshot_path": str(root),
+                    "snapshot_hash": digest,
+                },
+                Path(td) / "unused-cache",
+            )
+            self.assertEqual(checkout, root.resolve())
+            self.assertEqual(identity, digest)
+            self.assertFalse((Path(td) / "unused-cache").exists())
+
     def test_screening_uses_fixed_grounded_schema(self):
         body = {
             "relevant": True,

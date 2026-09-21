@@ -19,8 +19,11 @@ from .discovery import (
     discover_repositories,
     expand_keywords,
     load_keywords,
+    load_scicodepile_manifest,
+    merge_repository_channels,
     pin_repository_heads,
     resolve_github_token,
+    stratify_repositories,
     write_catalog,
 )
 from .queue import (
@@ -60,7 +63,8 @@ def _jsonl(path: Path) -> list[dict]:
 
 def snapshot_key(candidate: dict) -> str:
     identity = (
-        candidate.get("head_sha")
+        candidate.get("snapshot_hash")
+        or candidate.get("head_sha")
         or candidate.get("pushed_at")
         or candidate.get("updated_at")
         or "unknown"
@@ -174,15 +178,11 @@ def process_lease(
                 max_mined_candidates=int(recipe.get("max_mined_candidates", 600)),
                 allow_unknown_license=bool(recipe.get("allow_unknown_license", False)),
                 max_tokens=int(recipe.get("max_tokens", 16384)),
-                context_window_tokens=int(
-                    recipe.get("context_window_tokens", 262_144)
-                ),
+                context_window_tokens=int(recipe.get("context_window_tokens", 262_144)),
                 critic_max_tokens=int(recipe.get("critic_max_tokens", 4096)),
                 verifier_max_tokens=int(recipe.get("verifier_max_tokens", 4096)),
                 judge_max_tokens=int(recipe.get("judge_max_tokens", 8192)),
-                judge_max_input_chars=int(
-                    recipe.get("judge_max_input_chars", 160_000)
-                ),
+                judge_max_input_chars=int(recipe.get("judge_max_input_chars", 160_000)),
                 timeout=int(recipe.get("timeout", 2400)),
                 pipeline_concurrency=int(recipe.get("pipeline_concurrency", 3)),
             )
@@ -303,9 +303,7 @@ def aggregate_sft(
         result = item["result"]
         status = result.get("status")
         repositories[status if status in repositories else "missing"] += 1
-        selected_source_candidates += int(
-            result.get("selected_source_candidates") or 0
-        )
+        selected_source_candidates += int(result.get("selected_source_candidates") or 0)
         sft_path = result.get("sft")
         if status != "complete" or not sft_path:
             continue
@@ -347,9 +345,7 @@ def aggregate_sft(
             )
         keep = set(sorted(rows_by_trace)[:target_sft_rows])
         rows_by_trace = {
-            trace_id: row
-            for trace_id, row in rows_by_trace.items()
-            if trace_id in keep
+            trace_id: row for trace_id, row in rows_by_trace.items() if trace_id in keep
         }
         task_ids = {row.get("task_name") for row in rows_by_trace.values()}
         task_hashes = {row.get("task_hash") for row in rows_by_trace.values()}
@@ -567,6 +563,25 @@ def main() -> None:
     auto_parser = subparsers.add_parser("auto")
     auto_parser.add_argument("--output-root", type=Path, required=True)
     auto_parser.add_argument("--cache-root", type=Path, required=True)
+    auto_parser.add_argument(
+        "--repository-source",
+        choices=("keywords", "scicodepile", "hybrid"),
+        default="keywords",
+        help="primary repository discovery source; hybrid reserves a keyword channel",
+    )
+    auto_parser.add_argument(
+        "--scicodepile-catalog",
+        "--scicodepile-manifest",
+        dest="scicodepile_manifest",
+        type=Path,
+        help="catalog of local snapshots prepared from the clean SciCodePile dataset",
+    )
+    auto_parser.add_argument(
+        "--keyword-channel-limit",
+        type=int,
+        default=0,
+        help="number of repository slots reserved for keyword search in hybrid mode",
+    )
     auto_parser.add_argument("--keywords", type=Path, default=DEFAULT_KEYWORDS_PATH)
     auto_parser.add_argument("--min-stars", type=int, default=10)
     auto_parser.add_argument("--max-size-kb", type=int, default=1_000_000)
@@ -652,42 +667,89 @@ def main() -> None:
     )
     queue.configure_slots("llm", args.llm_slots)
     queue.configure_slots("repository", args.repository_slots)
-    keywords = load_keywords(args.keywords)
-    if args.expand_keywords:
-        scheduled = ScheduledChat(queue, llm.chat, worker="discovery")
-        keywords = expand_keywords(
-            keywords,
-            chat_fn=scheduled,
-            model=args.expansion_model,
-            max_new=args.max_expanded,
-        )
-    if args.query_limit is not None:
-        if args.query_limit < 1:
-            parser.error("--query-limit must be positive")
-        keywords = keywords[: args.query_limit]
-    github = GitHubClient(
-        resolve_github_token(),
-        search_scope=args.search_scope,
-        request_interval=args.request_interval,
-    )
     discovery_errors = []
     discovery_rejections = []
-    repositories = discover_repositories(
-        keywords,
-        search_fn=github.search,
-        min_stars=args.min_stars,
-        max_size_kb=args.max_size_kb,
-        language=args.language or None,
-        pages_per_query=args.pages_per_query,
-        per_page=args.per_page,
+    if args.repository_limit < 1:
+        parser.error("--repository-limit must be positive")
+    if args.keyword_channel_limit < 0:
+        parser.error("--keyword-channel-limit must be nonnegative")
+
+    primary = []
+    if args.repository_source in {"scicodepile", "hybrid"}:
+        if args.scicodepile_manifest is None:
+            parser.error(
+                "--scicodepile-catalog is required for scicodepile/hybrid sources"
+            )
+        reserved = (
+            min(args.keyword_channel_limit, args.repository_limit)
+            if args.repository_source == "hybrid"
+            else 0
+        )
+        primary_limit = args.repository_limit - reserved
+        if primary_limit < 1:
+            parser.error(
+                "hybrid mode must leave at least one slot for the SciCodePile source"
+            )
+        primary = stratify_repositories(
+            load_scicodepile_manifest(args.scicodepile_manifest),
+            limit=primary_limit,
+        )
+
+    secondary = []
+    if args.repository_source in {"keywords", "hybrid"}:
+        keyword_limit = (
+            args.repository_limit
+            if args.repository_source == "keywords"
+            else min(args.keyword_channel_limit, args.repository_limit - 1)
+        )
+        if keyword_limit:
+            keywords = load_keywords(args.keywords)
+            if args.expand_keywords:
+                scheduled = ScheduledChat(queue, llm.chat, worker="discovery")
+                keywords = expand_keywords(
+                    keywords,
+                    chat_fn=scheduled,
+                    model=args.expansion_model,
+                    max_new=args.max_expanded,
+                )
+            if args.query_limit is not None:
+                if args.query_limit < 1:
+                    parser.error("--query-limit must be positive")
+                keywords = keywords[: args.query_limit]
+            github = GitHubClient(
+                resolve_github_token(),
+                search_scope=args.search_scope,
+                request_interval=args.request_interval,
+            )
+            secondary = discover_repositories(
+                keywords,
+                search_fn=github.search,
+                min_stars=args.min_stars,
+                max_size_kb=args.max_size_kb,
+                language=args.language or None,
+                pages_per_query=args.pages_per_query,
+                per_page=args.per_page,
+                limit=max(keyword_limit, keyword_limit * 3),
+                errors=discovery_errors,
+                rejections=discovery_rejections,
+            )
+            primary_names = {
+                str(row.get("full_name") or "").casefold() for row in primary
+            }
+            secondary = [
+                row
+                for row in secondary
+                if str(row.get("full_name") or "").casefold() not in primary_names
+            ][:keyword_limit]
+            secondary = pin_repository_heads(
+                secondary,
+                resolve_fn=github.head_commit,
+                errors=discovery_errors,
+            )
+    repositories = merge_repository_channels(
+        primary,
+        secondary,
         limit=args.repository_limit,
-        errors=discovery_errors,
-        rejections=discovery_rejections,
-    )
-    repositories = pin_repository_heads(
-        repositories,
-        resolve_fn=github.head_commit,
-        errors=discovery_errors,
     )
     catalog_path = output_root / "catalog.jsonl"
     write_catalog(catalog_path, repositories)

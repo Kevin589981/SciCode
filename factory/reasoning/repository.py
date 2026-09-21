@@ -60,6 +60,31 @@ def checkout_repository(
     pinned_commit: str | None = None,
 ) -> tuple[Path, str]:
     """Clone/fetch one repository and return a detached, pinned snapshot."""
+    if candidate.get("source_kind") == "scicodepile_clean_dataset":
+        snapshot = candidate.get("snapshot_path")
+        snapshot_hash = candidate.get("snapshot_hash")
+        if not isinstance(snapshot, str) or not isinstance(snapshot_hash, str):
+            raise RepositoryError("clean-dataset candidate lacks snapshot metadata")
+        root = Path(snapshot).resolve()
+        if not root.is_dir():
+            raise RepositoryError(f"clean-dataset snapshot is unavailable: {root}")
+        metadata_path = root / ".scicodepile_snapshot.json"
+        if not metadata_path.is_file():
+            raise RepositoryError(f"clean-dataset snapshot metadata is absent: {root}")
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RepositoryError(
+                f"invalid clean-dataset snapshot metadata: {exc}"
+            ) from exc
+        if metadata.get("snapshot_hash") != snapshot_hash:
+            raise RepositoryError("clean-dataset snapshot hash disagrees with catalog")
+        if pinned_commit and str(pinned_commit) != snapshot_hash:
+            raise RepositoryError(
+                f"snapshot resolved {snapshot_hash}, expected {pinned_commit}"
+            )
+        return root, snapshot_hash
+
     cache_root = Path(cache_root)
     destination = cache_root / safe_slug(candidate["full_name"])
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -418,7 +443,12 @@ def process_repository(
     license_id = detect_license(root)
     if license_id == "unknown":
         license_id = candidate.get("license") or "unknown"
-    if license_id == "unknown" and not allow_unknown_license:
+    dataset_license_exception = candidate.get(
+        "source_kind"
+    ) == "scicodepile_clean_dataset" and bool(candidate.get("source_dataset_license"))
+    if license_id == "unknown" and not (
+        allow_unknown_license or dataset_license_exception
+    ):
         report = {
             "schema_version": REPORT_SCHEMA,
             "status": "rejected",
@@ -495,6 +525,12 @@ def process_repository(
         "url": candidate["url"],
         "commit": commit,
         "license": license_id,
+        "license_provenance": (
+            "upstream_file"
+            if license_id != "unknown"
+            else "upstream_unknown_dataset_distribution"
+        ),
+        "source_dataset_license": candidate.get("source_dataset_license"),
         "slug": safe_slug(candidate["full_name"]),
         "profile_schema": PROFILE_SCHEMA,
         "profile_path": str(profile_path),

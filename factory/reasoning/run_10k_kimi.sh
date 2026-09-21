@@ -11,6 +11,8 @@ dynamic_llm_concurrency=500..1792
 context_window_tokens=262144
 tasks_per_repo=3..16
 repository_limit=4000
+repository_source=SciCodePile_clean_dataset:3600 + keyword_search:400
+prerequisite: prepare the cleaned SciCodePile snapshots (command in factory/README.md)
 Run: bash factory/reasoning/run_10k_kimi.sh --execute
 EOF
   exit 0
@@ -22,6 +24,7 @@ CACHE_ROOT="${SCICODE_CACHE_ROOT:-${REPO_ROOT}/.cache/reasoning-repositories}"
 PYTHON_BIN="${SCICODE_FACTORY_PYTHON:-/root/scicode-factory-venv/bin/python}"
 METRICS_URL="${SCICODE_LLM_METRICS_URL:-http://10.100.184.127:29000/metrics}"
 MODEL="${SCICODE_LLM_MODEL:-Kimi-K3}"
+SCICODEPILE_CATALOG="${SCICODEPILE_CATALOG:-${REPO_ROOT}/.cache/scicodepile/catalog.jsonl}"
 
 export SCICODE_LLM_BASE_URL="${SCICODE_LLM_BASE_URL:-http://10.100.184.127:5050/v1}"
 export SCICODE_LLM_API_KEY="${SCICODE_LLM_API_KEY:-dummy}"
@@ -48,6 +51,9 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --llm-metrics-url "${METRICS_URL}" \
   --metrics-poll-seconds 30 \
   --metrics-timeout 5 \
+  --repository-source hybrid \
+  --scicodepile-catalog "${SCICODEPILE_CATALOG}" \
+  --keyword-channel-limit 400 \
   --min-stars 5 \
   --search-scope name,description \
   --pages-per-query 3 \

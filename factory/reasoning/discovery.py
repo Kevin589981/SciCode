@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,8 @@ from ..author import llm
 from .author import _json_objects
 
 DEFAULT_KEYWORDS_PATH = Path(__file__).with_name("science_keywords.txt")
+SCICODEPILE_DATASET = "SciCodePile/SciCode-Domain-Code"
+SCICODEPILE_REVISION = "2909e04dcf5957b52108aace56b9ae773cdac758"
 DOCUMENTATION_NAME_RE = re.compile(
     r"(?:^|[-_.])(awesome|papers?|books?|courses?|curriculum|roadmap)(?:$|[-_.])",
     re.IGNORECASE,
@@ -64,6 +67,179 @@ def load_keywords(path: Path = DEFAULT_KEYWORDS_PATH) -> list[str]:
     if not keywords:
         raise DiscoveryError(f"no keywords found in {path}")
     return keywords
+
+
+def _valid_full_name(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip().strip("/")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
+        return None
+    return value
+
+
+def _manifest_keywords(row: dict) -> list[str]:
+    values = row.get("matched_keywords", row.get("keywords", row.get("keyword", [])))
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, list):
+        return []
+    seen = set()
+    result = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        value = " ".join(value.split())[:120]
+        key = value.casefold()
+        if key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
+
+
+def load_scicodepile_manifest(path: Path) -> list[dict]:
+    """Load repository snapshots reconstructed from SciCodePile's clean data."""
+    path = Path(path)
+    if not path.is_file():
+        raise DiscoveryError(f"SciCodePile prepared catalog does not exist: {path}")
+    rows = []
+    seen = set()
+    with path.open(encoding="utf-8") as stream:
+        for number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise DiscoveryError(f"{path}:{number}: invalid JSON: {exc}") from exc
+            if not isinstance(row, dict):
+                raise DiscoveryError(f"{path}:{number}: row must be an object")
+            full_name = _valid_full_name(row.get("full_name") or row.get("repo_name"))
+            if full_name is None:
+                raise DiscoveryError(
+                    f"{path}:{number}: missing valid owner/repository name"
+                )
+            key = full_name.casefold()
+            if key in seen:
+                raise DiscoveryError(
+                    f"{path}:{number}: duplicate repository {full_name}"
+                )
+            seen.add(key)
+            snapshot_path = row.get("snapshot_path")
+            snapshot_hash = row.get("snapshot_hash")
+            if row.get("source_kind") != "scicodepile_clean_dataset":
+                raise DiscoveryError(
+                    f"{path}:{number}: expected a prepared clean-dataset snapshot"
+                )
+            if not isinstance(snapshot_path, str) or not Path(snapshot_path).is_dir():
+                raise DiscoveryError(
+                    f"{path}:{number}: snapshot directory is unavailable: {snapshot_path}"
+                )
+            if not isinstance(snapshot_hash, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", snapshot_hash
+            ):
+                raise DiscoveryError(f"{path}:{number}: invalid snapshot hash")
+            candidate = dict(row)
+            candidate["full_name"] = full_name
+            candidate["matched_keywords"] = _manifest_keywords(row)
+            candidate.setdefault("discovery_channels", ["scicodepile_clean_dataset"])
+            rows.append(candidate)
+    if not rows:
+        raise DiscoveryError(f"SciCodePile prepared catalog is empty: {path}")
+    return rows
+
+
+def stratify_repositories(
+    rows: Iterable[dict], *, limit: int | None = None
+) -> list[dict]:
+    """Round-robin scientific keywords with stable within-stratum ordering."""
+    rows = list(rows)
+    if limit is not None and limit < 0:
+        raise DiscoveryError("repository limit must be nonnegative")
+    by_keyword: dict[str, list[dict]] = {}
+    unclassified = []
+    for row in rows:
+        keywords = _manifest_keywords(row)
+        if not keywords:
+            unclassified.append(row)
+        for keyword in keywords:
+            by_keyword.setdefault(keyword.casefold(), []).append(row)
+
+    def stable_key(row: dict) -> tuple[str, str]:
+        name = str(row.get("full_name") or "").casefold()
+        return hashlib.sha256(name.encode()).hexdigest(), name
+
+    for bucket in by_keyword.values():
+        bucket.sort(key=stable_key)
+    unclassified.sort(key=stable_key)
+    positions = {keyword: 0 for keyword in by_keyword}
+    ordered = []
+    seen = set()
+    target = len(rows) if limit is None else min(limit, len(rows))
+    keywords = sorted(by_keyword)
+    while len(ordered) < target:
+        added = False
+        for keyword in keywords:
+            bucket = by_keyword[keyword]
+            position = positions[keyword]
+            while position < len(bucket):
+                row = bucket[position]
+                position += 1
+                key = str(row.get("full_name") or "").casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append(row)
+                added = True
+                break
+            positions[keyword] = position
+            if len(ordered) >= target:
+                break
+        if not added:
+            break
+    for row in unclassified:
+        key = str(row.get("full_name") or "").casefold()
+        if key not in seen and len(ordered) < target:
+            seen.add(key)
+            ordered.append(row)
+    if len(ordered) < target:
+        for row in sorted(rows, key=stable_key):
+            key = str(row.get("full_name") or "").casefold()
+            if key not in seen:
+                seen.add(key)
+                ordered.append(row)
+            if len(ordered) >= target:
+                break
+    return ordered
+
+
+def merge_repository_channels(
+    primary: Iterable[dict], secondary: Iterable[dict], *, limit: int | None = None
+) -> list[dict]:
+    """Merge channels by repository name while preserving primary precedence."""
+    merged = []
+    positions = {}
+    for channel_rows in (primary, secondary):
+        for source in channel_rows:
+            row = dict(source)
+            key = str(row.get("full_name") or "").casefold()
+            if not key:
+                continue
+            if key not in positions:
+                positions[key] = len(merged)
+                merged.append(row)
+            else:
+                existing = merged[positions[key]]
+                for field in ("matched_keywords", "discovery_channels"):
+                    values = existing.setdefault(field, [])
+                    seen = {str(value).casefold() for value in values}
+                    for value in row.get(field) or []:
+                        if str(value).casefold() not in seen:
+                            seen.add(str(value).casefold())
+                            values.append(value)
+            if limit is not None and len(merged) >= limit:
+                return merged
+    return merged
 
 
 def resolve_github_token() -> str | None:
@@ -304,6 +480,7 @@ def _candidate(item: dict, keyword: str) -> dict | None:
         "pushed_at": item.get("pushed_at"),
         "updated_at": item.get("updated_at"),
         "matched_keywords": [keyword],
+        "discovery_channels": ["keyword_search"],
         "discovered_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 

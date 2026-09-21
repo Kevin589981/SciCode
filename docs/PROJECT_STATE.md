@@ -119,6 +119,14 @@ selection criterion. The SFT artifact SHA-256 is
 
 Batch production v2 is implemented locally:
 
+- primary repository input is the revision-pinned 83.7GB
+  `SciCodePile/SciCode-Domain-Code` file dataset itself, not a repository-name
+  list followed by fresh GitHub clones; cleaned rows are reconstructed into
+  immutable local snapshots with path validation and content hashes;
+- only Python-bearing snapshots enter the current Python AST miner, selected by
+  deterministic round-robin coverage over SciCodePile keywords;
+- the legacy curated 40-term vocabulary plus up to 40 Kimi expansions remains
+  the bounded GitHub-search channel two rather than the production main source;
 - curated/optionally expanded scientific query discovery with serial,
   rate-limit-aware GitHub Search;
 - high-precision `name,description` discovery by default, with README-wide
@@ -139,7 +147,7 @@ Batch production v2 is implemented locally:
 - isolated repository/job artifact shards and deterministic atomic aggregation;
 - split enqueue/worker/status/aggregate commands and a bounded `auto` command.
 
-Offline verification currently passes 61 tests plus 6 subtests. The v2 commits
+Offline verification currently passes 67 factory tests. The v2 commits
 have been pushed and the `yicloud` checkout kept synchronized. A bounded live
 GitHub smoke resolved exact SHAs with no API errors; after the high-precision
 scope and documentation filters were applied, `CURENT/andes` was the leading
@@ -211,6 +219,11 @@ The prepared 10k batch path is implemented but has not been started:
   characters (approximately 225k tokens);
 - `factory/reasoning/run_10k_kimi.sh` is inert without `--execute`, preventing
   an accidental production launch.
+
+The prepared 10k recipe allocates 3,600 repository slots to cleaned
+SciCodePile snapshots and 400 to the legacy keyword/GitHub channel. The
+SciCodePile preparation download/index/extraction is a separate resumable step;
+it does not start the Kimi production batch.
 
 ## Smoke Endpoint
 
