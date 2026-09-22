@@ -17,7 +17,7 @@ from .discovery import (
     DEFAULT_KEYWORDS_PATH,
     GitHubClient,
     discover_repositories,
-    expand_keywords,
+    expand_keywords_best_effort,
     load_keywords,
     load_scicodepile_manifest,
     merge_repository_channels,
@@ -706,8 +706,9 @@ def main() -> None:
             keywords = load_keywords(args.keywords)
             if args.expand_keywords:
                 scheduled = ScheduledChat(queue, llm.chat, worker="discovery")
-                keywords = expand_keywords(
+                keywords = expand_keywords_best_effort(
                     keywords,
+                    errors=discovery_errors,
                     chat_fn=scheduled,
                     model=args.expansion_model,
                     max_new=args.max_expanded,

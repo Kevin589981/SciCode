@@ -314,6 +314,36 @@ not add generic software or generic AI terms. Do not repeat seed terms.
     return merged
 
 
+def expand_keywords_best_effort(
+    keywords: list[str],
+    *,
+    errors: list[dict],
+    chat_fn: Callable = llm.chat,
+    model: str | None = None,
+    max_new: int = 40,
+    timeout: int = 1200,
+) -> list[str]:
+    """Use optional LLM expansion without making it a batch-wide dependency."""
+    try:
+        return expand_keywords(
+            keywords,
+            chat_fn=chat_fn,
+            model=model,
+            max_new=max_new,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        errors.append(
+            {
+                "stage": "keyword_expansion",
+                "error": f"{type(exc).__name__}: {exc}"[:1200],
+                "fallback": "seed_keywords",
+                "seed_queries": len(keywords),
+            }
+        )
+        return list(keywords)
+
+
 class GitHubClient:
     """Minimal GitHub REST client with explicit search-rate backpressure."""
 

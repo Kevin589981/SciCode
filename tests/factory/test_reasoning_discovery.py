@@ -7,6 +7,7 @@ from factory.reasoning.discovery import (
     GitHubClient,
     discover_repositories,
     expand_keywords,
+    expand_keywords_best_effort,
     load_keywords,
     metadata_rejection,
     pin_repository_heads,
@@ -93,6 +94,20 @@ class ReasoningDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             expanded, ["ODE", "PDE", "finite volume", "computational plasma"]
         )
+
+    def test_keyword_expansion_failure_falls_back_to_seeds(self):
+        errors = []
+        expanded = expand_keywords_best_effort(
+            ["ODE", "PDE"],
+            errors=errors,
+            chat_fn=lambda *_a, **_k: {
+                "choices": [{"message": {"content": "incomplete response"}}]
+            },
+            model="expander",
+        )
+        self.assertEqual(expanded, ["ODE", "PDE"])
+        self.assertEqual(errors[0]["stage"], "keyword_expansion")
+        self.assertEqual(errors[0]["fallback"], "seed_keywords")
 
     def test_catalog_write_is_jsonl_and_keyword_comments_are_ignored(self):
         with tempfile.TemporaryDirectory() as td:
