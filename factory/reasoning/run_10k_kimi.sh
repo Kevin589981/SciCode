@@ -10,8 +10,8 @@ workers=500
 dynamic_llm_concurrency=500..1792
 context_window_tokens=262144
 tasks_per_repo=3..16
-repository_limit=4000
-repository_source=SciCodePile_clean_dataset:3600 + keyword_search:400
+repository_limit=3600
+repository_source=SciCodePile_clean_dataset_only
 prerequisite: prepare the cleaned SciCodePile snapshots (command in factory/README.md)
 Run: bash factory/reasoning/run_10k_kimi.sh --execute
 EOF
@@ -51,18 +51,9 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --llm-metrics-url "${METRICS_URL}" \
   --metrics-poll-seconds 30 \
   --metrics-timeout 5 \
-  --repository-source hybrid \
+  --repository-source scicodepile \
   --scicodepile-catalog "${SCICODEPILE_CATALOG}" \
-  --keyword-channel-limit 400 \
-  --min-stars 5 \
-  --search-scope name,description \
-  --pages-per-query 3 \
-  --per-page 100 \
-  --repository-limit 4000 \
-  --request-interval 2.1 \
-  --expand-keywords \
-  --max-expanded 40 \
-  --expansion-model "${MODEL}" \
+  --repository-limit 3600 \
   --tasks-per-repo 16 \
   --min-tasks-per-repo 3 \
   --max-mined-candidates 1200 \

@@ -246,10 +246,9 @@ Production uses the cleaned file-level
 read-only repository snapshots directly from the published `repo_name`,
 `file_path`, `content`, and `keyword` columns; it does not turn the dataset into
 a name list and re-clone changing GitHub repositories. The older curated
-keyword GitHub search remains an explicitly bounded second channel. That
-channel defaults to high-precision `name,description` search, rejects obvious
-documentation collections before clone/LLM use, and keeps separate error and
-rejection ledgers.
+keyword GitHub search remains available for separate experiments, but the 1k
+and 10k production launchers disable it and consume only these cleaned local
+snapshots.
 
 Prepare 3,600 primary snapshots once on a machine with sufficient disk. The
 download is pinned to the published dataset revision, resumable, and the raw
@@ -278,10 +277,9 @@ A bounded one-command run is:
 python -m factory.reasoning.batch auto \
   --output-root .work/reasoning-batch \
   --cache-root .work/repository-cache \
-  --repository-source hybrid \
+  --repository-source scicodepile \
   --scicodepile-catalog .cache/scicodepile/catalog.jsonl \
-  --keyword-channel-limit 2 \
-  --query-limit 3 --repository-limit 10 \
+  --repository-limit 10 \
   --workers 4 --repository-slots 2 --llm-slots 3 \
   --profile-model Kimi-K3 --author-model Kimi-K3 \
   --critic-model Kimi-K3 --verifier-model Kimi-K3 \

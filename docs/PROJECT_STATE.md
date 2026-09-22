@@ -223,10 +223,13 @@ The prepared 10k batch path is implemented but has not been started:
 - `factory/reasoning/run_10k_kimi.sh` is inert without `--execute`, preventing
   an accidental production launch.
 
-The prepared 10k recipe allocates 3,600 repository slots to cleaned
-SciCodePile snapshots and 400 to the legacy keyword/GitHub channel. The
-SciCodePile preparation download/index/extraction is a separate resumable step;
-it does not start the Kimi production batch.
+The prepared 1k and 10k recipes consume only cleaned SciCodePile snapshots:
+400 repositories for the 1k pilot and up to all 3,600 prepared repositories for
+the 10k run. The legacy keyword/GitHub implementation remains available in the
+codebase but is disabled in production launchers; production never turns the
+dataset's repository names into fresh GitHub clones. SciCodePile preparation
+download/index/extraction is a separate resumable step and does not itself
+start the Kimi production batch.
 
 Full preparation of the pinned 83.7GB dataset was started on `yicloud` on
 2026-09-21. Its durable paths are `.cache/scicodepile/raw`,

@@ -11,7 +11,7 @@ llm_concurrency=200
 context_window_tokens=262144
 tasks_per_repo=3..16
 repository_limit=400
-repository_source=SciCodePile_clean_dataset:360 + keyword_search:40
+repository_source=SciCodePile_clean_dataset_only
 prerequisite: prepare and validate the cleaned SciCodePile snapshot catalog
 Run: bash factory/reasoning/run_1k_kimi.sh --execute
 EOF
@@ -53,18 +53,9 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --llm-metrics-url "${METRICS_URL}" \
   --metrics-poll-seconds 30 \
   --metrics-timeout 5 \
-  --repository-source hybrid \
+  --repository-source scicodepile \
   --scicodepile-catalog "${SCICODEPILE_CATALOG}" \
-  --keyword-channel-limit 40 \
-  --min-stars 5 \
-  --search-scope name,description \
-  --pages-per-query 3 \
-  --per-page 100 \
   --repository-limit 400 \
-  --request-interval 2.1 \
-  --expand-keywords \
-  --max-expanded 40 \
-  --expansion-model "${MODEL}" \
   --tasks-per-repo 16 \
   --min-tasks-per-repo 3 \
   --max-mined-candidates 1200 \
