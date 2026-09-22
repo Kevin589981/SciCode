@@ -50,6 +50,13 @@ def safe_relative_path(value: object) -> str | None:
     return path.as_posix()
 
 
+def safe_nonnegative_int(value: object) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -104,6 +111,7 @@ def _arrow_batches(
     invalid_rows: dict[str, int] | None = None,
 ):
     try:
+        import pyarrow as arrow
         import pyarrow.csv as arrow_csv
     except ImportError as exc:
         raise DiscoveryError(
@@ -133,7 +141,13 @@ def _arrow_batches(
             newlines_in_values=True,
             invalid_row_handler=skip_invalid_row,
         ),
-        convert_options=arrow_csv.ConvertOptions(include_columns=columns),
+        # Treat metadata as strings first. A small number of upstream rows have
+        # corrupt bytes in nominally numeric columns; inferred int conversion
+        # would abort the complete 83.7GB preparation for nonessential metadata.
+        convert_options=arrow_csv.ConvertOptions(
+            include_columns=columns,
+            column_types={column: arrow.string() for column in columns},
+        ),
     )
     yield from reader
 
@@ -182,7 +196,7 @@ def index_dataset(csv_files: list[Path], connection: sqlite3.Connection) -> dict
                         full_name,
                         relative,
                         str(language or ""),
-                        max(0, int(file_size or 0)),
+                        safe_nonnegative_int(file_size),
                         int(extension == ".py" or str(language).casefold() == "python"),
                         int(name.startswith("readme")),
                     )

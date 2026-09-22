@@ -7,6 +7,7 @@ from pathlib import Path
 from factory.reasoning.discovery import load_scicodepile_manifest
 from factory.reasoning.scicodepile_dataset import (
     prepare_dataset,
+    safe_nonnegative_int,
     safe_relative_path,
 )
 
@@ -50,6 +51,11 @@ class SciCodePileDatasetTests(unittest.TestCase):
         self.assertIsNone(safe_relative_path("../secret.py"))
         self.assertIsNone(safe_relative_path("/tmp/secret.py"))
         self.assertIsNone(safe_relative_path("C:\\secret.py"))
+
+    def test_numeric_metadata_is_nonfatal(self):
+        self.assertEqual(safe_nonnegative_int("42"), 42)
+        self.assertEqual(safe_nonnegative_int("-4"), 0)
+        self.assertEqual(safe_nonnegative_int("corrupt"), 0)
 
     def test_prepares_clean_snapshots_and_resumes(self):
         with tempfile.TemporaryDirectory() as td:
