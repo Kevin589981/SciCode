@@ -76,6 +76,12 @@ class SciCodePileDatasetTests(unittest.TestCase):
                 ),
             ]
             write_csv(raw / "data" / "dataset_a.csv", first)
+            with (raw / "data" / "dataset_a.csv").open(
+                "a", encoding="utf-8", newline=""
+            ) as stream:
+                stream.write(
+                    '"ODE","science/broken","broken.py",".py","10","1","print(1)"\n'
+                )
             write_csv(raw / "data" / "dataset_b.csv", second)
             prepared = root / "prepared"
             catalog = prepared / "catalog.jsonl"
@@ -91,6 +97,8 @@ class SciCodePileDatasetTests(unittest.TestCase):
             self.assertEqual(report["repositories"], 3)
             self.assertEqual(report["python_repositories"], 2)
             self.assertEqual(report["prepared_repositories"], 2)
+            self.assertEqual(report["invalid_index_rows"], 1)
+            self.assertEqual(report["invalid_extraction_rows"], 1)
             candidates = load_scicodepile_manifest(catalog)
             self.assertEqual(
                 {candidate["full_name"] for candidate in candidates},

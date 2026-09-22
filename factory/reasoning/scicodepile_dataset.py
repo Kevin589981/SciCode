@@ -97,7 +97,12 @@ def _connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
-def _arrow_batches(path: Path, *, include_content: bool):
+def _arrow_batches(
+    path: Path,
+    *,
+    include_content: bool,
+    invalid_rows: dict[str, int] | None = None,
+):
     try:
         import pyarrow.csv as arrow_csv
     except ImportError as exc:
@@ -114,10 +119,20 @@ def _arrow_batches(path: Path, *, include_content: bool):
     ]
     if include_content:
         columns.append("content")
+
+    def skip_invalid_row(_row) -> str:
+        if invalid_rows is not None:
+            key = str(path)
+            invalid_rows[key] = invalid_rows.get(key, 0) + 1
+        return "skip"
+
     reader = arrow_csv.open_csv(
         path,
         read_options=arrow_csv.ReadOptions(block_size=128 * 1024 * 1024),
-        parse_options=arrow_csv.ParseOptions(newlines_in_values=True),
+        parse_options=arrow_csv.ParseOptions(
+            newlines_in_values=True,
+            invalid_row_handler=skip_invalid_row,
+        ),
         convert_options=arrow_csv.ConvertOptions(include_columns=columns),
     )
     yield from reader
@@ -126,6 +141,7 @@ def _arrow_batches(path: Path, *, include_content: bool):
 def index_dataset(csv_files: list[Path], connection: sqlite3.Connection) -> dict:
     """Index cleaned file metadata; completed CSVs are skipped on resume."""
     indexed_files = 0
+    invalid_rows: dict[str, int] = {}
     for position, path in enumerate(csv_files, 1):
         size = path.stat().st_size
         previous = connection.execute(
@@ -139,7 +155,11 @@ def index_dataset(csv_files: list[Path], connection: sqlite3.Connection) -> dict
             (str(path), size),
         )
         rows_seen = 0
-        for batch in _arrow_batches(path, include_content=False):
+        for batch in _arrow_batches(
+            path,
+            include_content=False,
+            invalid_rows=invalid_rows,
+        ):
             values = batch.to_pydict()
             file_rows = []
             keyword_rows = []
@@ -191,6 +211,7 @@ def index_dataset(csv_files: list[Path], connection: sqlite3.Connection) -> dict
                     "position": position,
                     "total": len(csv_files),
                     "rows": rows_seen,
+                    "invalid_rows": invalid_rows.get(str(path), 0),
                 }
             ),
             flush=True,
@@ -203,6 +224,8 @@ def index_dataset(csv_files: list[Path], connection: sqlite3.Connection) -> dict
     ).fetchone()[0]
     return {
         "newly_indexed_files": indexed_files,
+        "invalid_index_rows": sum(invalid_rows.values()),
+        "invalid_index_rows_by_file": invalid_rows,
         "repositories": repository_count,
         "python_repositories": python_repository_count,
     }
@@ -263,6 +286,7 @@ def extract_snapshots(
     selected_names = {row["full_name"] for row in selected}
     snapshots_root.mkdir(parents=True, exist_ok=True)
     extracted_rows = 0
+    invalid_rows: dict[str, int] = {}
     for position, path in enumerate(csv_files, 1):
         previous = connection.execute(
             "SELECT extracted_selection FROM source_files WHERE path=?", (str(path),)
@@ -271,7 +295,11 @@ def extract_snapshots(
             continue
         rows_seen = 0
         rows_written = 0
-        for batch in _arrow_batches(path, include_content=True):
+        for batch in _arrow_batches(
+            path,
+            include_content=True,
+            invalid_rows=invalid_rows,
+        ):
             values = batch.to_pydict()
             records = []
             for repo, file_path, content in zip(
@@ -310,11 +338,16 @@ def extract_snapshots(
                     "total": len(csv_files),
                     "rows": rows_seen,
                     "selected_rows": rows_written,
+                    "invalid_rows": invalid_rows.get(str(path), 0),
                 }
             ),
             flush=True,
         )
-    return {"newly_extracted_rows": extracted_rows}
+    return {
+        "newly_extracted_rows": extracted_rows,
+        "invalid_extraction_rows": sum(invalid_rows.values()),
+        "invalid_extraction_rows_by_file": invalid_rows,
+    }
 
 
 def build_catalog(
