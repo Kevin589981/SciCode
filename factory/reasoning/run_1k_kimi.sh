@@ -9,8 +9,11 @@ target_sft_rows=1000
 workers=200
 llm_concurrency=200
 context_window_tokens=262144
+author_max_tokens=131072
+solver_max_tokens=196608
+verifier_max_tokens=65536
 tasks_per_repo=3..16
-repository_limit=400
+repository_limit=3600
 repository_source=SciCodePile_clean_dataset_only
 prerequisite: prepare and validate the cleaned SciCodePile snapshot catalog
 Run: bash factory/reasoning/run_1k_kimi.sh --execute
@@ -19,7 +22,7 @@ EOF
 fi
 
 REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode}"
-OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-1k-pilot-v1}"
+OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-1k-pilot-v2}"
 CACHE_ROOT="${SCICODE_CACHE_ROOT:-${REPO_ROOT}/.cache/reasoning-repositories}"
 PYTHON_BIN="${SCICODE_FACTORY_PYTHON:-/root/scicode-factory-venv/bin/python}"
 METRICS_URL="${SCICODE_LLM_METRICS_URL:-http://10.100.184.127:29000/metrics}"
@@ -55,9 +58,10 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --metrics-timeout 5 \
   --repository-source scicodepile \
   --scicodepile-catalog "${SCICODEPILE_CATALOG}" \
-  --repository-limit 400 \
+  --repository-limit 3600 \
   --tasks-per-repo 16 \
   --min-tasks-per-repo 3 \
+  --reservation-rows-per-repo 5 \
   --max-mined-candidates 1200 \
   --profile-model "${MODEL}" \
   --author-model "${MODEL}" \
@@ -66,10 +70,11 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --solver-model "${MODEL}" \
   --judge-model "${MODEL}" \
   --context-window-tokens 262144 \
-  --max-tokens 65536 \
-  --critic-max-tokens 4096 \
-  --verifier-max-tokens 4096 \
-  --judge-max-tokens 8192 \
+  --author-max-tokens 131072 \
+  --solver-max-tokens 196608 \
+  --critic-max-tokens 16384 \
+  --verifier-max-tokens 65536 \
+  --judge-max-tokens 32768 \
   --judge-max-input-chars 900000 \
   --timeout 7200 \
   --pipeline-concurrency 4 \

@@ -22,15 +22,19 @@ def critic_response(scores=None):
         "nontriviality": 4,
     }
     return {
-        "choices": [{
-            "message": {
-                "content": json.dumps({
-                    "scores": scores,
-                    "shallow_failure_mode": None,
-                    "rationale": "The task requires dependent scientific decisions.",
-                })
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "scores": scores,
+                            "shallow_failure_mode": None,
+                            "rationale": "The task requires dependent scientific decisions.",
+                        }
+                    )
+                }
             }
-        }],
+        ],
         "usage": {"completion_tokens": 80},
     }
 
@@ -76,6 +80,15 @@ class ReasoningPreflightTests(unittest.TestCase):
 
         record = preflight_task(task_for(), chat_fn=fake_chat, model="critic")
         self.assertFalse(record["accepted"])
+
+    def test_critic_accepts_result_in_native_reasoning_field(self):
+        value = critic_response()
+        content = value["choices"][0]["message"].pop("content")
+        value["choices"][0]["message"]["reasoning_content"] = content
+        record = preflight_task(
+            task_for(), chat_fn=lambda *_a, **_k: value, model="critic"
+        )
+        self.assertTrue(record["accepted"])
 
     def test_malformed_critic_response_raises(self):
         def fake_chat(messages, **kwargs):

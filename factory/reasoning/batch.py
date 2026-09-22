@@ -100,7 +100,10 @@ def enqueue_catalog(
             {
                 "repository": candidate,
                 "recipe": recipe,
-                "expected_rows": int(recipe.get("tasks_per_repo", 3)),
+                "expected_rows": int(
+                    recipe.get("reservation_rows_per_repo")
+                    or recipe.get("tasks_per_repo", 3)
+                ),
             },
             priority=int(candidate.get("stars") or 0),
             max_attempts=max_attempts,
@@ -178,6 +181,12 @@ def process_lease(
                 max_mined_candidates=int(recipe.get("max_mined_candidates", 600)),
                 allow_unknown_license=bool(recipe.get("allow_unknown_license", False)),
                 max_tokens=int(recipe.get("max_tokens", 16384)),
+                author_max_tokens=int(
+                    recipe.get("author_max_tokens") or recipe.get("max_tokens", 16384)
+                ),
+                solver_max_tokens=int(
+                    recipe.get("solver_max_tokens") or recipe.get("max_tokens", 16384)
+                ),
                 context_window_tokens=int(recipe.get("context_window_tokens", 262_144)),
                 critic_max_tokens=int(recipe.get("critic_max_tokens", 4096)),
                 verifier_max_tokens=int(recipe.get("verifier_max_tokens", 4096)),
@@ -458,9 +467,12 @@ def _recipe_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--additional-judge-model", action="append", default=[])
     parser.add_argument("--tasks-per-repo", type=int, default=3)
     parser.add_argument("--min-tasks-per-repo", type=int, default=3)
+    parser.add_argument("--reservation-rows-per-repo", type=int)
     parser.add_argument("--max-mined-candidates", type=int, default=600)
     parser.add_argument("--allow-unknown-license", action="store_true")
     parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--author-max-tokens", type=int)
+    parser.add_argument("--solver-max-tokens", type=int)
     parser.add_argument("--context-window-tokens", type=int, default=262_144)
     parser.add_argument("--critic-max-tokens", type=int, default=4096)
     parser.add_argument("--verifier-max-tokens", type=int, default=4096)
@@ -483,9 +495,14 @@ def recipe_from_args(args) -> dict:
         "additional_judge_models": args.additional_judge_model,
         "tasks_per_repo": args.tasks_per_repo,
         "min_tasks_per_repo": args.min_tasks_per_repo,
+        "reservation_rows_per_repo": (
+            args.reservation_rows_per_repo or args.tasks_per_repo
+        ),
         "max_mined_candidates": args.max_mined_candidates,
         "allow_unknown_license": args.allow_unknown_license,
         "max_tokens": args.max_tokens,
+        "author_max_tokens": args.author_max_tokens or args.max_tokens,
+        "solver_max_tokens": args.solver_max_tokens or args.max_tokens,
         "context_window_tokens": args.context_window_tokens,
         "critic_max_tokens": args.critic_max_tokens,
         "verifier_max_tokens": args.verifier_max_tokens,
@@ -617,6 +634,15 @@ def main() -> None:
     _recipe_options(auto_parser)
 
     args = parser.parse_args()
+    if hasattr(args, "reservation_rows_per_repo"):
+        reservation = args.reservation_rows_per_repo
+        if reservation is not None and (
+            reservation < 1 or reservation > args.tasks_per_repo
+        ):
+            parser.error(
+                "--reservation-rows-per-repo must be between 1 and "
+                "--tasks-per-repo"
+            )
     if args.command == "status":
         print(json.dumps(WorkQueue(args.db).counts(), indent=2))
         return

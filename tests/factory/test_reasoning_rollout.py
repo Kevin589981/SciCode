@@ -14,13 +14,16 @@ FINAL = "The stable form follows from the derivation.\n```python\ndef stable_dem
 
 def response():
     return {
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "reasoning_content": THINKING,
-                "content": FINAL,
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": THINKING,
+                    "content": FINAL,
+                },
+                "finish_reason": "stop",
             }
-        }],
+        ],
         "usage": {"prompt_tokens": 120, "completion_tokens": 240},
     }
 
@@ -61,14 +64,27 @@ class ReasoningRolloutTests(unittest.TestCase):
         self.assertEqual(trace["task_hash"], canonical_hash(task))
         self.assertEqual(trace["provenance"]["factory_commit"], "abc123")
         self.assertEqual(trace["max_tokens"], 16384)
+        self.assertEqual(trace["finish_reason"], "stop")
+        self.assertFalse(trace["truncated"])
+
+    def test_collect_trace_marks_length_termination_as_truncated(self):
+        value = response()
+        value["choices"][0]["finish_reason"] = "length"
+        trace = collect_trace(
+            task_for(), chat_fn=lambda *_a, **_k: value, model="solver"
+        )
+        self.assertEqual(trace["finish_reason"], "length")
+        self.assertTrue(trace["truncated"])
 
     def test_outcome_error_does_not_destroy_raw_trace(self):
         def broken_outcome(task, message):
             raise RuntimeError("checker unavailable")
 
         trace = collect_trace(
-            task_for(), chat_fn=lambda *_a, **_k: response(),
-            model="solver", outcome_fn=broken_outcome,
+            task_for(),
+            chat_fn=lambda *_a, **_k: response(),
+            model="solver",
+            outcome_fn=broken_outcome,
         )
         self.assertEqual(trace["outcome"]["status"], "error")
         self.assertIn("checker unavailable", trace["outcome"]["detail"])
@@ -88,16 +104,31 @@ class ReasoningRolloutTests(unittest.TestCase):
                 return response()
 
             first = run_rollouts(
-                tasks_path, out, chat_fn=fake_chat, model="solver-a",
-                attempts=1, concurrency=1, factory_commit="abc",
+                tasks_path,
+                out,
+                chat_fn=fake_chat,
+                model="solver-a",
+                attempts=1,
+                concurrency=1,
+                factory_commit="abc",
             )
             second = run_rollouts(
-                tasks_path, out, chat_fn=fake_chat, model="solver-a",
-                attempts=1, concurrency=1, factory_commit="abc",
+                tasks_path,
+                out,
+                chat_fn=fake_chat,
+                model="solver-a",
+                attempts=1,
+                concurrency=1,
+                factory_commit="abc",
             )
             third = run_rollouts(
-                tasks_path, out, chat_fn=fake_chat, model="solver-b",
-                attempts=1, concurrency=1, factory_commit="abc",
+                tasks_path,
+                out,
+                chat_fn=fake_chat,
+                model="solver-b",
+                attempts=1,
+                concurrency=1,
+                factory_commit="abc",
             )
             rows = [
                 json.loads(line)

@@ -113,6 +113,7 @@ def collect_trace(
         timeout=timeout,
     )
     try:
+        choice = response["choices"][0]
         assistant = llm.assistant_message(response)
     except (KeyError, IndexError, TypeError) as exc:
         raise RolloutError(
@@ -132,6 +133,16 @@ def collect_trace(
                 "kind": "auxiliary_check",
                 "detail": f"{type(exc).__name__}: {exc}"[:1000],
             }
+    finish_reason = choice.get("finish_reason")
+    if not isinstance(finish_reason, str) or not finish_reason.strip():
+        finish_reason = "unknown"
+    usage = response.get("usage") or {}
+    completion_tokens = usage.get("completion_tokens")
+    token_boundary = (
+        isinstance(completion_tokens, int)
+        and not isinstance(completion_tokens, bool)
+        and completion_tokens >= max_tokens - 1
+    )
     trace = {
         "schema_version": TRACE_SCHEMA,
         "trace_id": trace_id_for(task, model, attempt, run_variant),
@@ -140,10 +151,12 @@ def collect_trace(
         "model": model,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "finish_reason": finish_reason,
+        "truncated": finish_reason == "length" or token_boundary,
         "attempt": attempt,
         "messages": messages,
         "outcome": outcome,
-        "usage": response.get("usage") or {},
+        "usage": usage,
         "timing_sec": round(time.monotonic() - started, 3),
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "provenance": {
@@ -224,9 +237,7 @@ def run_rollouts(
                 if (row.get("verifier") or {}).get("model") == verifier_model
             ]
         records = [
-            row
-            for row in records
-            if row.get("policy_version") == VERIFICATION_POLICY
+            row for row in records if row.get("policy_version") == VERIFICATION_POLICY
         ]
         admission_sets.append(
             {row.get("task_hash") for row in records if row.get("accepted") is True}

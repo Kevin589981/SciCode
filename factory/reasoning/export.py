@@ -1,4 +1,5 @@
 """Export outcome-independent, thinking-preserving canonical SFT JSONL."""
+
 from __future__ import annotations
 
 import argparse
@@ -86,9 +87,7 @@ def _admitted_task_hashes(
                 if (row.get("verifier") or {}).get("model") == verifier_model
             ]
         records = [
-            row
-            for row in records
-            if row.get("policy_version") == VERIFICATION_POLICY
+            row for row in records if row.get("policy_version") == VERIFICATION_POLICY
         ]
         admission_sets.append(
             {row.get("task_hash") for row in records if row.get("accepted") is True}
@@ -97,9 +96,7 @@ def _admitted_task_hashes(
 
 
 def _sft_messages(trace: dict, grade: dict, inline_thinking: bool) -> list[dict]:
-    annotations = {
-        item["message_index"]: item for item in grade["message_annotations"]
-    }
+    annotations = {item["message_index"]: item for item in grade["message_annotations"]}
     messages = []
     for index, original in enumerate(trace["messages"]):
         role = original["role"]
@@ -150,6 +147,12 @@ def _sft_row(
             "inline_and_preserved" if inline_thinking else "separate_reasoning_content"
         ),
         "outcome": trace.get("outcome"),
+        "termination": {
+            "finish_reason": trace.get("finish_reason", "unknown"),
+            "truncated": trace.get("truncated"),
+            "max_tokens": trace.get("max_tokens"),
+            "usage": trace.get("usage") or {},
+        },
         "trace_quality": {
             "scores": grade["scores"],
             "rationale": grade["rationale"],
@@ -181,9 +184,7 @@ def export_sft(
     inline_thinking: bool = False,
 ) -> dict:
     """Join artifacts and select by reasoning grade, never by executable status."""
-    tasks = {
-        task["task_id"]: validate_task(task) for task in _jsonl(Path(tasks_path))
-    }
+    tasks = {task["task_id"]: validate_task(task) for task in _jsonl(Path(tasks_path))}
     traces = [validate_trace(trace) for trace in _jsonl(Path(traces_path))]
     raw_grades = _jsonl(Path(grades_path))
     grades = _select_grades(raw_grades, judge_model)
@@ -317,4 +318,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -9,6 +9,9 @@ target_sft_rows=10000
 workers=500
 dynamic_llm_concurrency=500..1792
 context_window_tokens=262144
+author_max_tokens=131072
+solver_max_tokens=196608
+verifier_max_tokens=65536
 tasks_per_repo=3..16
 repository_limit=3600
 repository_source=SciCodePile_clean_dataset_only
@@ -64,10 +67,11 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --solver-model "${MODEL}" \
   --judge-model "${MODEL}" \
   --context-window-tokens 262144 \
-  --max-tokens 65536 \
-  --critic-max-tokens 4096 \
-  --verifier-max-tokens 4096 \
-  --judge-max-tokens 8192 \
+  --author-max-tokens 131072 \
+  --solver-max-tokens 196608 \
+  --critic-max-tokens 16384 \
+  --verifier-max-tokens 65536 \
+  --judge-max-tokens 32768 \
   --judge-max-input-chars 900000 \
   --timeout 7200 \
   --pipeline-concurrency 4 \

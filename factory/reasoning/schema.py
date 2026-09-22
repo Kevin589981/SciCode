@@ -4,6 +4,7 @@ The factory intentionally keeps these validators dependency-free. LLM calls may
 make semantic judgments, but malformed records and missing reasoning evidence are
 rejected deterministically at every JSONL boundary.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -58,7 +59,9 @@ def _mapping(value: object, path: str) -> Mapping:
 
 def _string(value: object, path: str, min_chars: int = 1) -> str:
     if not isinstance(value, str) or len(value.strip()) < min_chars:
-        raise SchemaError(f"{path} must be a string with at least {min_chars} characters")
+        raise SchemaError(
+            f"{path} must be a string with at least {min_chars} characters"
+        )
     return value
 
 
@@ -131,17 +134,23 @@ def validate_task(task: object) -> dict:
 
     payload = _mapping(task.get("archetype_payload"), "archetype_payload")
     if archetype == "derive_implement":
-        _string_list(payload.get("assumptions"), "archetype_payload.assumptions", minimum=2)
+        _string_list(
+            payload.get("assumptions"), "archetype_payload.assumptions", minimum=2
+        )
         _string(payload.get("derivation_target"), "archetype_payload.derivation_target")
     elif archetype == "diagnose_revise":
-        _string_list(payload.get("observations"), "archetype_payload.observations", minimum=2)
+        _string_list(
+            payload.get("observations"), "archetype_payload.observations", minimum=2
+        )
         _string_list(
             payload.get("candidate_causes"),
             "archetype_payload.candidate_causes",
             minimum=2,
         )
     else:
-        _string_list(payload.get("alternatives"), "archetype_payload.alternatives", minimum=2)
+        _string_list(
+            payload.get("alternatives"), "archetype_payload.alternatives", minimum=2
+        )
         _string_list(
             payload.get("decision_criteria"),
             "archetype_payload.decision_criteria",
@@ -158,8 +167,16 @@ def validate_trace(trace: object) -> dict:
     for name in ("trace_id", "task_id", "task_hash", "model"):
         _string(trace.get(name), name)
     max_tokens = trace.get("max_tokens")
-    if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 1:
+    if (
+        not isinstance(max_tokens, int)
+        or isinstance(max_tokens, bool)
+        or max_tokens < 1
+    ):
         raise SchemaError("max_tokens must be a positive integer")
+    if "finish_reason" in trace:
+        _string(trace.get("finish_reason"), "finish_reason")
+    if "truncated" in trace and not isinstance(trace.get("truncated"), bool):
+        raise SchemaError("truncated must be a boolean")
     messages = trace.get("messages")
     if not isinstance(messages, list) or not messages:
         raise SchemaError("messages must be a nonempty list")
@@ -177,7 +194,9 @@ def validate_trace(trace: object) -> dict:
             assistant_indices.append(index)
             reasoning = message.get("reasoning_content", "")
             if not isinstance(reasoning, str):
-                raise SchemaError(f"messages[{index}].reasoning_content must be a string")
+                raise SchemaError(
+                    f"messages[{index}].reasoning_content must be a string"
+                )
             has_reasoning = has_reasoning or bool(reasoning.strip())
     if not assistant_indices:
         raise SchemaError("messages must contain an assistant message")
@@ -211,11 +230,15 @@ def validate_grade(grade: object, trace: object | None = None) -> dict:
         annotation = _mapping(annotation, f"message_annotations[{index}]")
         message_index = annotation.get("message_index")
         if not isinstance(message_index, int) or isinstance(message_index, bool):
-            raise SchemaError(f"message_annotations[{index}].message_index must be an integer")
+            raise SchemaError(
+                f"message_annotations[{index}].message_index must be an integer"
+            )
         annotation_indices.append(message_index)
         for name in ("train_reasoning", "train_content"):
             if not isinstance(annotation.get(name), bool):
-                raise SchemaError(f"message_annotations[{index}].{name} must be a boolean")
+                raise SchemaError(
+                    f"message_annotations[{index}].{name} must be a boolean"
+                )
         if annotation.get("quality") not in {"good", "medium", "bad"}:
             raise SchemaError(f"message_annotations[{index}].quality is unsupported")
         _string(annotation.get("rationale"), f"message_annotations[{index}].rationale")
@@ -227,10 +250,10 @@ def validate_grade(grade: object, trace: object | None = None) -> dict:
         if grade["trace_id"] != trace["trace_id"]:
             raise SchemaError("grade trace_id does not match trace")
         assistant_indices = [
-            index for index, message in enumerate(trace["messages"])
+            index
+            for index, message in enumerate(trace["messages"])
             if message["role"] == "assistant"
         ]
         if sorted(annotation_indices) != assistant_indices:
             raise SchemaError("message_annotations must cover every assistant message")
     return dict(grade)
-

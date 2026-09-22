@@ -45,6 +45,8 @@ class ReasoningExportTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["schema_version"], SFT_SCHEMA)
             self.assertEqual(rows[0]["outcome"]["status"], "fail")
+            self.assertEqual(rows[0]["termination"]["finish_reason"], "unknown")
+            self.assertEqual(rows[0]["termination"]["max_tokens"], 16384)
             self.assertEqual(report["selected"], 1)
             self.assertEqual(report["rejected"], 1)
 
@@ -93,11 +95,15 @@ class ReasoningExportTests(unittest.TestCase):
             preflight = root / "preflight.jsonl"
             verification = root / "verification.jsonl"
             tasks.write_text(
-                "".join(json.dumps(row) + "\n" for row in (admitted_task, blocked_task)),
+                "".join(
+                    json.dumps(row) + "\n" for row in (admitted_task, blocked_task)
+                ),
                 encoding="utf-8",
             )
             traces.write_text(
-                "".join(json.dumps(row) + "\n" for row in (admitted_trace, blocked_trace)),
+                "".join(
+                    json.dumps(row) + "\n" for row in (admitted_trace, blocked_trace)
+                ),
                 encoding="utf-8",
             )
             grades.write_text(
@@ -109,31 +115,37 @@ class ReasoningExportTests(unittest.TestCase):
             )
             preflight.write_text(
                 "".join(
-                    json.dumps({
-                        "task_hash": row["task_hash"],
-                        "accepted": True,
-                        "policy_version": PREFLIGHT_POLICY,
-                        "critic": {"model": "critic"},
-                    }) + "\n"
+                    json.dumps(
+                        {
+                            "task_hash": row["task_hash"],
+                            "accepted": True,
+                            "policy_version": PREFLIGHT_POLICY,
+                            "critic": {"model": "critic"},
+                        }
+                    )
+                    + "\n"
                     for row in (admitted_trace, blocked_trace)
                 ),
                 encoding="utf-8",
             )
             verification.write_text(
-                "".join(json.dumps(row) + "\n" for row in (
-                    {
-                        "task_hash": admitted_trace["task_hash"],
-                        "accepted": True,
-                        "policy_version": VERIFICATION_POLICY,
-                        "verifier": {"model": "verifier"},
-                    },
-                    {
-                        "task_hash": blocked_trace["task_hash"],
-                        "accepted": True,
-                        "policy_version": "obsolete-source-policy",
-                        "verifier": {"model": "verifier"},
-                    },
-                )),
+                "".join(
+                    json.dumps(row) + "\n"
+                    for row in (
+                        {
+                            "task_hash": admitted_trace["task_hash"],
+                            "accepted": True,
+                            "policy_version": VERIFICATION_POLICY,
+                            "verifier": {"model": "verifier"},
+                        },
+                        {
+                            "task_hash": blocked_trace["task_hash"],
+                            "accepted": True,
+                            "policy_version": "obsolete-source-policy",
+                            "verifier": {"model": "verifier"},
+                        },
+                    )
+                ),
                 encoding="utf-8",
             )
             out = root / "sft.jsonl"
@@ -148,7 +160,9 @@ class ReasoningExportTests(unittest.TestCase):
                 verifier_model="verifier",
             )
             rows = [json.loads(line) for line in out.read_text().splitlines()]
-            self.assertEqual([row["trace_id"] for row in rows], [admitted_trace["trace_id"]])
+            self.assertEqual(
+                [row["trace_id"] for row in rows], [admitted_trace["trace_id"]]
+            )
             self.assertEqual(report["not_admitted"], 1)
 
 

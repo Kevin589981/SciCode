@@ -223,13 +223,31 @@ The prepared 10k batch path is implemented but has not been started:
 - `factory/reasoning/run_10k_kimi.sh` is inert without `--execute`, preventing
   an accidental production launch.
 
-The prepared 1k and 10k recipes consume only cleaned SciCodePile snapshots:
-400 repositories for the 1k pilot and up to all 3,600 prepared repositories for
-the 10k run. The legacy keyword/GitHub implementation remains available in the
+The prepared 1k and 10k recipes consume only cleaned SciCodePile snapshots. The
+corrected 1k pilot and 10k run enqueue up to all 3,600 prepared repositories and
+stop claiming work when their accepted-row target is covered. The legacy
+keyword/GitHub implementation remains available in the
 codebase but is disabled in production launchers; production never turns the
 dataset's repository names into fresh GitHub clones. SciCodePile preparation
 download/index/extraction is a separate resumable step and does not itself
 start the Kimi production batch.
+
+The first 400-repository pilot exposed a verifier bottleneck: 681 verification
+attempts failed to emit a complete result under the former 4,096-token output
+ceiling, leaving only two candidate SFT rows despite 298 depth-preflight
+acceptances. The corrected recipe separates author and solver budgets and uses
+131,072 author, 196,608 solver, 16,384 critic, 65,536 verifier, and 32,768 judge
+output tokens within the declared 262,144-token run context. New solver traces
+persist `finish_reason` plus a derived `truncated` flag, and exported SFT rows
+retain this termination audit metadata. The legacy shared `--max-tokens` remains
+as a backwards-compatible fallback only.
+
+The pilot uses a five-row reservation estimate per leased repository. This
+allows 200 concurrent repository jobs for a 1,000-row target; the deterministic
+aggregator still trims accepted output to exactly 1,000 rows. Reserving the
+16-row per-repository ceiling had unintentionally limited the prior pilot to
+about 63 simultaneous jobs and a 400-repository catalog could not reach 1,000
+rows at the measured gate yield.
 
 Full preparation of the pinned 83.7GB dataset was started on `yicloud` on
 2026-09-21. Its durable paths are `.cache/scicodepile/raw`,

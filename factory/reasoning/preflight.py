@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..author import llm
+from .author import _json_objects
 from .schema import SchemaError, canonical_hash, validate_task
 
 PREFLIGHT_SCHEMA = "scicode-reasoning-preflight-v1"
@@ -154,9 +155,18 @@ def critic_task(
         timeout=timeout,
     )
     try:
-        value = _parse_object(response["choices"][0]["message"].get("content") or "")
+        message = response["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise PreflightError(f"critic response has no usable message: {exc}") from exc
+    objects = []
+    for field in ("content", "reasoning_content"):
+        objects.extend(_json_objects(message.get(field) or ""))
+    value = next(
+        (item for item in objects if isinstance(item.get("scores"), dict)), None
+    )
+    if value is None:
+        # Preserve the older, more specific parse error for malformed content.
+        value = _parse_object(message.get("content") or "")
     scores = value.get("scores")
     if not isinstance(scores, dict):
         raise PreflightError("critic scores must be an object")

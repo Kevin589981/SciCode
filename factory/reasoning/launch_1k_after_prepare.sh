@@ -14,7 +14,7 @@ PREPARER_PID="$2"
 REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode}"
 PYTHON_BIN="${SCICODE_FACTORY_PYTHON:-/root/scicode-factory-venv/bin/python}"
 CATALOG="${SCICODEPILE_CATALOG:-${REPO_ROOT}/.cache/scicodepile/catalog.jsonl}"
-OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-1k-pilot-v1}"
+OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-1k-pilot-v2}"
 
 if [[ -r "/proc/${PREPARER_PID}/cmdline" ]]; then
   command_line="$(tr '\0' ' ' < "/proc/${PREPARER_PID}/cmdline")"

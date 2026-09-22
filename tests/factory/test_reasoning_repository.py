@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from factory.envbuild.vet import detect_license
 from factory.reasoning.repository import (
     checkout_repository,
     rank_candidates,
@@ -24,6 +25,12 @@ def candidate(function, module, source, lines=30):
 
 
 class ReasoningRepositoryTests(unittest.TestCase):
+    def test_license_detector_ignores_directory_named_license(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "LICENSE").mkdir()
+            self.assertEqual(detect_license(root), "unknown")
+
     def test_repository_context_prefers_readme(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

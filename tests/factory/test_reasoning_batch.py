@@ -35,6 +35,21 @@ def sft_row(index):
 
 
 class ReasoningBatchTests(unittest.TestCase):
+    def test_enqueue_uses_explicit_target_reservation_estimate(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            queue = WorkQueue(root / "batch.sqlite3")
+            catalog = root / "catalog.jsonl"
+            catalog.write_text(json.dumps(repository(1)) + "\n", encoding="utf-8")
+            enqueue_catalog(
+                queue,
+                catalog,
+                recipe={"tasks_per_repo": 16, "reservation_rows_per_repo": 5},
+            )
+            lease = queue.claim("worker", target_rows=1000)
+            self.assertIsNotNone(lease)
+            self.assertEqual(lease.payload["expected_rows"], 5)
+
     def test_workers_make_isolated_shards_and_aggregate_deterministically(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
