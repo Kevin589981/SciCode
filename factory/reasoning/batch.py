@@ -194,6 +194,7 @@ def process_lease(
                 judge_max_input_chars=int(recipe.get("judge_max_input_chars", 160_000)),
                 timeout=int(recipe.get("timeout", 2400)),
                 pipeline_concurrency=int(recipe.get("pipeline_concurrency", 3)),
+                resume_complete=bool(recipe.get("resume_complete", False)),
             )
     return {
         "status": report["status"],
@@ -567,6 +568,11 @@ def main() -> None:
     worker_parser.add_argument("--no-watch", action="store_true")
     _worker_options(worker_parser)
 
+    resume_parser = subparsers.add_parser("resume")
+    resume_parser.add_argument("--db", type=Path, required=True)
+    resume_parser.add_argument("--workers", type=int, required=True)
+    _worker_options(resume_parser)
+
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("--db", type=Path, required=True)
 
@@ -683,6 +689,26 @@ def main() -> None:
             target_sft_rows=args.target_sft_rows,
         )
         print(json.dumps({**result, "queue": queue.counts()}, indent=2))
+        return
+    if args.command == "resume":
+        queue = WorkQueue(args.db)
+        llm_slots = queue.configured_slots("llm")
+        capacity_controller = _capacity_controller(args, maximum=llm_slots)
+        worker_results = run_local_workers(
+            queue,
+            workers=args.workers,
+            processor_factory=lambda worker: _processor(
+                queue, args, worker, capacity_controller
+            ),
+            job_lease_seconds=args.job_lease_seconds,
+            target_sft_rows=args.target_sft_rows,
+        )
+        report = aggregate_sft(
+            queue,
+            args.output_root / "accepted-sft.jsonl",
+            target_sft_rows=args.target_sft_rows,
+        )
+        print(json.dumps({"workers": worker_results, "aggregate": report}, indent=2))
         return
 
     output_root = args.output_root.resolve()

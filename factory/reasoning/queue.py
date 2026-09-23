@@ -563,7 +563,7 @@ class WorkQueue:
         *,
         lease_seconds: float,
         wait_timeout: float = 86_400,
-        poll_interval: float = 0.25,
+        poll_interval: float = 0.5,
         capacity_controller: MetricsCapacityController | None = None,
     ) -> SlotLease:
         deadline = time.monotonic() + wait_timeout
@@ -571,6 +571,31 @@ class WorkQueue:
             if capacity_controller is not None:
                 capacity_controller.refresh()
             now = time.time()
+            # A full pool is the normal state in a batch run. Inspect it with
+            # a read transaction before taking the database's single writer
+            # lock; the write transaction below still rechecks capacity.
+            with contextlib.closing(self._connect()) as connection:
+                configured = connection.execute(
+                    "SELECT slot_count FROM resource_limits WHERE resource=?",
+                    (resource,),
+                ).fetchone()
+                if configured is None:
+                    raise QueueError(f"resource {resource!r} has no configured slots")
+                active = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM resource_slots WHERE resource=? "
+                        "AND holder IS NOT NULL AND lease_expires >= ?",
+                        (resource, now),
+                    ).fetchone()[0]
+                )
+                dynamic_limit = int(configured["slot_count"])
+                if capacity_controller is not None:
+                    dynamic_limit = min(dynamic_limit, capacity_controller.limit(active))
+            if active >= dynamic_limit:
+                if time.monotonic() >= deadline:
+                    raise QueueError(f"timed out waiting for {resource!r} slot")
+                time.sleep(poll_interval)
+                continue
             with contextlib.closing(self._connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 try:

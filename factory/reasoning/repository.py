@@ -438,6 +438,7 @@ def process_repository(
     judge_max_input_chars: int = 160_000,
     timeout: int = 2400,
     pipeline_concurrency: int = 3,
+    resume_complete: bool = False,
 ) -> dict:
     """Run a resumable per-repository funnel and isolated SFT shard."""
     if min_tasks_per_repo < len(ARCHETYPES):
@@ -452,7 +453,9 @@ def process_repository(
     report_path = output_dir / "repository_report.json"
     if report_path.exists():
         report = _read_json(report_path)
-        if report.get("status") in {"complete", "rejected"}:
+        if report.get("status") == "rejected" or (
+            report.get("status") == "complete" and not resume_complete
+        ):
             return report
 
     snapshot_path = output_dir / "source_snapshot.json"

@@ -111,6 +111,7 @@ def collect_trace(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        allow_partial=True,
     )
     try:
         choice = response["choices"][0]
@@ -152,7 +153,7 @@ def collect_trace(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "finish_reason": finish_reason,
-        "truncated": finish_reason == "length" or token_boundary,
+        "truncated": finish_reason in {"length", "stream_interrupted"} or token_boundary,
         "attempt": attempt,
         "messages": messages,
         "outcome": outcome,

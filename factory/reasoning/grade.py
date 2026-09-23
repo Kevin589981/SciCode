@@ -89,6 +89,8 @@ def _judge_prompt(task: dict, trace: dict) -> str:
     trace_view = {
         "messages": trace["messages"],
         "outcome": trace.get("outcome"),
+        "finish_reason": trace.get("finish_reason", "unknown"),
+        "truncated": trace.get("truncated", False),
     }
     assistant_indices = [
         index
@@ -106,8 +108,11 @@ unsupported claims, dead loops, and confidently wrong scientific premises.
 TASK:
 {json.dumps(task_view, ensure_ascii=False, indent=2)}
 
-COMPLETE TRACE:
+RECORDED TRACE (which may end before the final answer):
 {json.dumps(trace_view, ensure_ascii=False, indent=2)}
+
+If the stream was interrupted, assess the reasoning that was actually recorded.
+Do not infer a missing final answer or automatically reject useful partial reasoning.
 
 Assistant message indices that must each be annotated: {assistant_indices}
 

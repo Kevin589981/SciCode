@@ -148,6 +148,25 @@ other_metric{worker="a"} 99
                 )
             queue.release_slot(held)
 
+    def test_full_slot_pool_does_not_require_sqlite_writer_lock(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "jobs.sqlite3"
+            queue = WorkQueue(path, busy_timeout=0.01)
+            queue.configure_slots("llm", 1)
+            held = queue.acquire_slot("llm", "holder", lease_seconds=10)
+            with contextlib.closing(sqlite3.connect(path, timeout=0.01)) as writer:
+                writer.execute("BEGIN IMMEDIATE")
+                with self.assertRaisesRegex(QueueError, "timed out waiting"):
+                    queue.acquire_slot(
+                        "llm",
+                        "blocked",
+                        lease_seconds=1,
+                        wait_timeout=0.03,
+                        poll_interval=0.01,
+                    )
+                writer.execute("ROLLBACK")
+            queue.release_slot(held)
+
     def test_slot_context_renews_past_initial_lease(self):
         with tempfile.TemporaryDirectory() as td:
             queue = WorkQueue(Path(td) / "queue.sqlite3")

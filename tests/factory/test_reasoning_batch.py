@@ -10,6 +10,7 @@ from factory.reasoning.batch import (
     run_local_workers,
 )
 from factory.reasoning.queue import WorkQueue
+from factory.reasoning.repair_stream_batch import repair
 
 
 def repository(index):
@@ -35,6 +36,35 @@ def sft_row(index):
 
 
 class ReasoningBatchTests(unittest.TestCase):
+    def test_stream_repair_requeues_complete_shards_without_losing_rejections(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "batch.sqlite3"
+            queue = WorkQueue(db)
+            for index in range(3):
+                queue.enqueue(
+                    "reasoning_repository",
+                    f"repo-{index}",
+                    {
+                        "repository": repository(index),
+                        "recipe": {"factory_commit": "old"},
+                        "expected_rows": 5,
+                    },
+                )
+            first = queue.claim("one")
+            second = queue.claim("two")
+            queue.claim("three")
+            queue.complete(first, {"status": "complete", "sft_rows": 1})
+            queue.complete(second, {"status": "rejected", "sft_rows": 0})
+            result = repair(db)
+            self.assertTrue(Path(result["backup"]).exists())
+            self.assertEqual(result["requeued_done"], 1)
+            self.assertEqual(result["requeued_leased"], 1)
+            self.assertEqual(result["completed_rejections_preserved"], 1)
+            self.assertEqual(queue.counts(), {"pending": 2, "done": 1})
+            resumed = queue.claim("resumed")
+            self.assertTrue(resumed.payload["recipe"]["resume_complete"])
+            self.assertEqual(resumed.payload["recipe"]["factory_commit"], result["factory_commit"])
+
     def test_enqueue_uses_explicit_target_reservation_estimate(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
