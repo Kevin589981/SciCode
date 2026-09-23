@@ -65,6 +65,7 @@ def run_pipeline(
     author_attempts: int = 2,
     factory_commit: str | None = None,
     inline_thinking: bool = False,
+    reuse_existing_tasks: bool = False,
 ) -> dict:
     """Run the v1 vertical slice and write an auditable manifest."""
     author_max_tokens = author_max_tokens or max_tokens
@@ -111,20 +112,34 @@ def run_pipeline(
     judge_model = judge_model or fallback_model
     started = dt.datetime.now(dt.timezone.utc).isoformat()
 
-    author_result = run_authoring(
-        Path(mined_path),
-        Path(repo_meta_path),
-        paths["tasks"],
-        archetypes=ARCHETYPES,
-        limit=limit,
-        chat_fn=chat_fn,
-        model=author_model,
-        temperature=author_temperature,
-        max_tokens=author_max_tokens,
-        timeout=timeout,
-        concurrency=concurrency,
-        max_attempts=author_attempts,
-    )
+    if (
+        reuse_existing_tasks
+        and paths["tasks"].exists()
+        and paths["tasks"].stat().st_size
+    ):
+        author_result = {
+            "written": 0,
+            "skipped": sum(
+                1 for line in paths["tasks"].open(encoding="utf-8") if line.strip()
+            ),
+            "errors": 0,
+            "reused_existing_tasks": True,
+        }
+    else:
+        author_result = run_authoring(
+            Path(mined_path),
+            Path(repo_meta_path),
+            paths["tasks"],
+            archetypes=ARCHETYPES,
+            limit=limit,
+            chat_fn=chat_fn,
+            model=author_model,
+            temperature=author_temperature,
+            max_tokens=author_max_tokens,
+            timeout=timeout,
+            concurrency=concurrency,
+            max_attempts=author_attempts,
+        )
     preflight_result = run_preflight(
         paths["tasks"],
         paths["preflight"],
@@ -223,6 +238,7 @@ def run_pipeline(
             "solver_temperature": solver_temperature,
             "max_tokens": max_tokens,
             "author_max_tokens": author_max_tokens,
+            "reuse_existing_tasks": reuse_existing_tasks,
             "solver_max_tokens": solver_max_tokens,
             "context_window_tokens": context_window_tokens,
             "critic_max_tokens": critic_max_tokens,

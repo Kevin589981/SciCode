@@ -451,8 +451,10 @@ def process_repository(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / "repository_report.json"
+    previous_complete = False
     if report_path.exists():
         report = _read_json(report_path)
+        previous_complete = report.get("status") == "complete"
         if report.get("status") == "rejected" or (
             report.get("status") == "complete" and not resume_complete
         ):
@@ -599,6 +601,7 @@ def process_repository(
         judge_max_input_chars=judge_max_input_chars,
         timeout=timeout,
         concurrency=pipeline_concurrency,
+        reuse_existing_tasks=resume_complete and previous_complete,
     )
     report = {
         "schema_version": REPORT_SCHEMA,

@@ -18,7 +18,12 @@ from pathlib import Path
 from .rollout import current_commit
 
 
-def repair(db_path: Path, *, stopped_pid: int | None = None) -> dict:
+def repair(
+    db_path: Path,
+    *,
+    stopped_pid: int | None = None,
+    backup_suffix: str = ".pre-stream-repair",
+) -> dict:
     db_path = db_path.resolve()
     if stopped_pid is not None:
         try:
@@ -27,7 +32,13 @@ def repair(db_path: Path, *, stopped_pid: int | None = None) -> dict:
             pass
         else:
             raise RuntimeError(f"old controller PID {stopped_pid} is still running")
-    backup_path = db_path.with_name(db_path.stem + ".pre-stream-repair.sqlite3")
+    if (
+        not backup_suffix.startswith(".")
+        or "/" in backup_suffix
+        or "\\" in backup_suffix
+    ):
+        raise ValueError("backup_suffix must be a filename suffix beginning with '.'")
+    backup_path = db_path.with_name(db_path.stem + backup_suffix + ".sqlite3")
     if backup_path.exists():
         raise FileExistsError(f"backup already exists: {backup_path}")
     commit = current_commit()
@@ -84,12 +95,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--stopped-pid", type=int)
+    parser.add_argument("--backup-suffix", default=".pre-stream-repair")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     if not args.execute:
         print("Dry run. Add --execute after stopping the old controller.")
         return
-    print(json.dumps(repair(args.db, stopped_pid=args.stopped_pid), indent=2))
+    print(
+        json.dumps(
+            repair(
+                args.db, stopped_pid=args.stopped_pid, backup_suffix=args.backup_suffix
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -356,6 +356,34 @@ class ReasoningPipelineTests(unittest.TestCase):
             self.assertEqual(len(calls), call_count)
             self.assertEqual(second["stages"]["author"]["skipped"], 3)
             self.assertTrue(all("automatic_review" in row for row in sft))
+            mined.write_text(
+                mined.read_text(encoding="utf-8") + json.dumps(candidate(3)) + "\n",
+                encoding="utf-8",
+            )
+            recovered = run_pipeline(
+                mined,
+                repo_meta,
+                output,
+                chat_fn=fake_chat,
+                author_model="author",
+                critic_model="critic",
+                verifier_model="verifier",
+                solver_model="solver",
+                judge_model="judge",
+                additional_judge_models=("judge-2",),
+                limit=4,
+                concurrency=2,
+                factory_commit="commit123",
+                author_max_tokens=12000,
+                solver_max_tokens=16000,
+                critic_max_tokens=3000,
+                verifier_max_tokens=4000,
+                judge_max_tokens=5000,
+                reuse_existing_tasks=True,
+            )
+            self.assertEqual(len(calls), call_count)
+            self.assertTrue(recovered["stages"]["author"]["reused_existing_tasks"])
+            self.assertEqual(recovered["artifacts"]["tasks"]["rows"], 3)
 
 
 if __name__ == "__main__":
