@@ -7,7 +7,9 @@ import concurrent.futures as futures
 import hashlib
 import json
 import os
+import random
 import socket
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -224,18 +226,20 @@ def worker_loop(
     counts = {"completed": 0, "retried": 0, "failed": 0}
     handled = 0
     while max_jobs is None or handled < max_jobs:
-        lease = queue.claim(
-            worker,
-            kinds=(JOB_KIND,),
-            lease_seconds=job_lease_seconds,
-            target_rows=target_sft_rows,
+        lease = _retry_sqlite_lock(
+            lambda: queue.claim(
+                worker,
+                kinds=(JOB_KIND,),
+                lease_seconds=job_lease_seconds,
+                target_rows=target_sft_rows,
+            )
         )
         if lease is None:
-            progress = queue.row_progress(kinds=(JOB_KIND,))
+            progress = _retry_sqlite_lock(lambda: queue.row_progress(kinds=(JOB_KIND,)))
             if target_sft_rows is not None and progress["completed"] >= target_sft_rows:
                 counts["target_reached"] = progress["completed"]
                 break
-            states = queue.counts()
+            states = _retry_sqlite_lock(queue.counts)
             if watch and (states.get("pending", 0) or states.get("leased", 0)):
                 time.sleep(idle_interval)
                 continue
@@ -243,18 +247,41 @@ def worker_loop(
         handled += 1
         try:
             result = processor(lease)
-            queue.complete(lease, result)
+            _retry_sqlite_lock(lambda: queue.complete(lease, result))
             counts["completed"] += 1
         except Exception as exc:
             delay = min(900.0, 15.0 * (2 ** max(0, lease.attempt - 1)))
-            status = queue.fail(
-                lease,
-                f"{type(exc).__name__}: {exc}",
-                retryable=True,
-                retry_delay=delay,
+            error_message = f"{type(exc).__name__}: {exc}"
+            status = _retry_sqlite_lock(
+                lambda: queue.fail(
+                    lease,
+                    error_message,
+                    retryable=True,
+                    retry_delay=delay,
+                )
             )
             counts["retried" if status == "pending" else "failed"] += 1
     return counts
+
+
+def _retry_sqlite_lock(operation, *, max_wait: float = 300.0):
+    """Retry transient writer contention without losing a repository worker."""
+    deadline = time.monotonic() + max_wait
+    attempt = 0
+    while True:
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+            delay = min(5.0, 0.25 * 2 ** min(attempt, 5))
+            time.sleep(
+                min(
+                    random.uniform(0.8, 1.2) * delay,
+                    max(0.0, deadline - time.monotonic()),
+                )
+            )
+            attempt += 1
 
 
 def run_local_workers(
@@ -646,8 +673,7 @@ def main() -> None:
             reservation < 1 or reservation > args.tasks_per_repo
         ):
             parser.error(
-                "--reservation-rows-per-repo must be between 1 and "
-                "--tasks-per-repo"
+                "--reservation-rows-per-repo must be between 1 and --tasks-per-repo"
             )
     if args.command == "status":
         print(json.dumps(WorkQueue(args.db).counts(), indent=2))

@@ -1,13 +1,16 @@
 import json
+import sqlite3
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from factory.reasoning.batch import (
     aggregate_sft,
     enqueue_catalog,
     run_local_workers,
+    worker_loop,
 )
 from factory.reasoning.queue import WorkQueue
 from factory.reasoning.repair_stream_batch import repair
@@ -36,6 +39,31 @@ def sft_row(index):
 
 
 class ReasoningBatchTests(unittest.TestCase):
+    def test_worker_retries_transient_sqlite_claim_lock(self):
+        with tempfile.TemporaryDirectory() as td:
+            queue = WorkQueue(Path(td) / "batch.sqlite3")
+            queue.enqueue("reasoning_repository", "one", {"expected_rows": 1})
+            original_claim = queue.claim
+            calls = 0
+
+            def flaky_claim(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise sqlite3.OperationalError("database is locked")
+                return original_claim(*args, **kwargs)
+
+            with patch.object(queue, "claim", side_effect=flaky_claim):
+                result = worker_loop(
+                    queue,
+                    worker="test",
+                    processor=lambda _lease: {"status": "complete", "sft_rows": 1},
+                    max_jobs=1,
+                )
+            self.assertEqual(calls, 2)
+            self.assertEqual(result["completed"], 1)
+            self.assertEqual(queue.counts(), {"done": 1})
+
     def test_stream_repair_requeues_complete_shards_without_losing_rejections(self):
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "batch.sqlite3"
@@ -63,7 +91,9 @@ class ReasoningBatchTests(unittest.TestCase):
             self.assertEqual(queue.counts(), {"pending": 2, "done": 1})
             resumed = queue.claim("resumed")
             self.assertTrue(resumed.payload["recipe"]["resume_complete"])
-            self.assertEqual(resumed.payload["recipe"]["factory_commit"], result["factory_commit"])
+            self.assertEqual(
+                resumed.payload["recipe"]["factory_commit"], result["factory_commit"]
+            )
 
     def test_enqueue_uses_explicit_target_reservation_estimate(self):
         with tempfile.TemporaryDirectory() as td:
