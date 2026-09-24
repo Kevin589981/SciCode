@@ -733,6 +733,11 @@ def main() -> None:
             queue,
             args.output_root / "accepted-sft.jsonl",
             target_sft_rows=args.target_sft_rows,
+            allow_incomplete=(
+                args.target_sft_rows is not None
+                and queue.row_progress(kinds=(JOB_KIND,))["completed"]
+                < args.target_sft_rows
+            ),
         )
         print(json.dumps({"workers": worker_results, "aggregate": report}, indent=2))
         return
@@ -854,6 +859,11 @@ def main() -> None:
         queue,
         output_root / "accepted-sft.jsonl",
         target_sft_rows=args.target_sft_rows,
+        allow_incomplete=(
+            args.target_sft_rows is not None
+            and queue.row_progress(kinds=(JOB_KIND,))["completed"]
+            < args.target_sft_rows
+        ),
     )
     print(
         json.dumps(

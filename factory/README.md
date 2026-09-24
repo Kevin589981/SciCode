@@ -301,13 +301,21 @@ bash factory/reasoning/run_10k_kimi.sh
 
 # Explicit production start.
 bash factory/reasoning/run_10k_kimi.sh --execute
+
+# In a second process, prepare the remaining cleaned Python repositories from
+# the existing 83.7GB download and enqueue them into the same 10k batch.
+bash factory/reasoning/run_10k_kimi.sh --prepare-and-enqueue
 ```
 
-It uses a 262144-token context-window contract, a 65536-token solver/author
-output ceiling, 500 repository workers, and an exact 10000-row aggregation
-target. `max_tokens` is an output limit, not the model context length; the
-separate `--context-window-tokens` value validates the judge input/output
-budget. The launcher does not start automatically when installed or tested.
+The initial run consumes the 3,600 prepared repositories; the expansion path
+adds up to all 19,559 Python repositories already indexed in the cleaned
+SciCodePile dataset, without cloning GitHub repositories or changing the 1k
+pilot artifacts. Both modes use the same pinned recipe, so enqueueing the larger
+catalog does not duplicate the initial 3,600 jobs. The 10k run uses a 262144
+token context contract, 131072 author and 196608 solver output ceilings, 500
+repository workers, and a 10000-row target. If the catalog is exhausted below
+the target, the controller exports the available rows with `allow_incomplete`
+clearly recorded in its report.
 
 LLM admission is deployment-aware. Every 30 seconds the controller reads
 `http://10.100.184.127:29000/metrics`, equivalent to:
@@ -324,11 +332,11 @@ workers cannot race and each allocate the whole deployment budget. If metrics
 are unavailable, capacity falls back to 500 rather than running unbounded.
 
 The 10000-row target is also enforced transactionally. A leased repository
-reserves its configured maximum contribution; workers pause when completed plus
+reserves five expected rows; workers pause when completed plus
 reserved rows cover the target and resume if rejected gates release that
-reservation. Aggregation trims the final at-most-one-repository overshoot
-deterministically and writes exactly 10000 rows with matching companion
-artifacts.
+reservation. When the target is reached, aggregation trims the final
+at-most-one-repository overshoot deterministically and writes exactly 10000
+rows with matching companion artifacts.
 
 For production, discovery/enqueue, workers, status, and aggregation can be run
 separately:
