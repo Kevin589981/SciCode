@@ -905,6 +905,12 @@ def main() -> None:
         print(json.dumps({"workers": worker_results, "aggregate": report}, indent=2))
         return
 
+    db_path = args.db or args.output_root.resolve() / "batch.sqlite3"
+    with controller_lock(db_path, exclusive=True):
+        return _run_auto(args, parser)
+
+
+def _run_auto(args, parser: argparse.ArgumentParser) -> None:
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     queue = WorkQueue(
@@ -1012,16 +1018,15 @@ def main() -> None:
     local_slots = LocalSlotManager()
     local_slots.configure_slots("llm", args.llm_slots)
     local_slots.configure_slots("repository", args.repository_slots)
-    with controller_lock(queue.path, exclusive=True):
-        worker_results = run_local_workers(
-            queue,
-            workers=args.workers,
-            processor_factory=lambda worker: _processor(
-                queue, args, worker, capacity_controller, local_slots
-            ),
-            job_lease_seconds=args.job_lease_seconds,
-            target_sft_rows=args.target_sft_rows,
-        )
+    worker_results = run_local_workers(
+        queue,
+        workers=args.workers,
+        processor_factory=lambda worker: _processor(
+            queue, args, worker, capacity_controller, local_slots
+        ),
+        job_lease_seconds=args.job_lease_seconds,
+        target_sft_rows=args.target_sft_rows,
+    )
     report = aggregate_sft(
         queue,
         output_root / "accepted-sft.jsonl",

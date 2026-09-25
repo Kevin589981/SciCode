@@ -54,15 +54,23 @@ class ReasoningBatchTests(unittest.TestCase):
             queue = WorkQueue(Path(td) / 'batch.sqlite3')
             for index in range(60):
                 queue.enqueue('reasoning_repository', str(index), {'expected_rows': 1})
-            results = run_local_workers(
-                queue,
-                workers=500,
-                processor_factory=lambda _worker: (
-                    lambda _lease: {'status': 'complete', 'sft_rows': 1}
-                ),
-                target_sft_rows=60,
-            )
+            original_counts = queue.counts
+            count_scans = 0
+            def counted():
+                nonlocal count_scans
+                count_scans += 1
+                return original_counts()
+            with patch.object(queue, 'counts', side_effect=counted):
+                results = run_local_workers(
+                    queue,
+                    workers=500,
+                    processor_factory=lambda _worker: (
+                        lambda _lease: {'status': 'complete', 'sft_rows': 1}
+                    ),
+                    target_sft_rows=60,
+                )
             self.assertEqual(sum(row['completed'] for row in results), 60)
+            self.assertLess(count_scans, 10)
             self.assertEqual(queue.counts(), {'done': 60})
             self.assertEqual(
                 queue.row_progress(kinds=('reasoning_repository',)),
