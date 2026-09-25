@@ -199,6 +199,7 @@ def run_rollouts(
     if attempts < 1 or concurrency < 1:
         raise RolloutError("attempts and concurrency must be positive")
     tasks = [validate_task(row) for row in _jsonl(Path(tasks_path))]
+    task_views = {canonical_hash(task): student_view_hash(task) for task in tasks}
     model = model or llm.client_config()["model"]
     admission_sets = []
     if preflight_path is not None:
@@ -213,7 +214,11 @@ def run_rollouts(
             row for row in records if row.get("policy_version") == PREFLIGHT_POLICY
         ]
         admission_sets.append(
-            {row.get("task_hash") for row in records if row.get("accepted") is True}
+            {
+                row.get("task_hash") for row in records
+                if row.get("accepted") is True
+                and row.get("student_view_hash") == task_views.get(row.get("task_hash"))
+            }
         )
     if verification_path is not None:
         records = _jsonl(Path(verification_path))
@@ -227,7 +232,11 @@ def run_rollouts(
             row for row in records if row.get("policy_version") == VERIFICATION_POLICY
         ]
         admission_sets.append(
-            {row.get("task_hash") for row in records if row.get("accepted") is True}
+            {
+                row.get("task_hash") for row in records
+                if row.get("accepted") is True
+                and row.get("student_view_hash") == task_views.get(row.get("task_hash"))
+            }
         )
     admitted_hashes = None
     if admission_sets:

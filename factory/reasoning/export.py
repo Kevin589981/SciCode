@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .grade import GRADE_POLICY_VERSION, GradeError, current_grades
 from .preflight import PREFLIGHT_POLICY
-from .schema import validate_grade, validate_task, validate_trace
+from .schema import canonical_hash, validate_grade, validate_task, validate_trace
 from .student_view import render_student_user, student_view_hash
 from .verify import VERIFICATION_POLICY
 
@@ -58,6 +58,7 @@ def _select_grades(grades: list[dict], judge_model: str | None) -> dict[str, dic
 
 def _admitted_task_hashes(
     *,
+    task_views: dict[str, str],
     preflight_path: Path | None,
     verification_path: Path | None,
     preflight_model: str | None,
@@ -77,7 +78,11 @@ def _admitted_task_hashes(
             row for row in records if row.get("policy_version") == PREFLIGHT_POLICY
         ]
         admission_sets.append(
-            {row.get("task_hash") for row in records if row.get("accepted") is True}
+            {
+                row.get("task_hash") for row in records
+                if row.get("accepted") is True
+                and row.get("student_view_hash") == task_views.get(row.get("task_hash"))
+            }
         )
     if verification_path is not None:
         records = _jsonl(Path(verification_path))
@@ -91,7 +96,11 @@ def _admitted_task_hashes(
             row for row in records if row.get("policy_version") == VERIFICATION_POLICY
         ]
         admission_sets.append(
-            {row.get("task_hash") for row in records if row.get("accepted") is True}
+            {
+                row.get("task_hash") for row in records
+                if row.get("accepted") is True
+                and row.get("student_view_hash") == task_views.get(row.get("task_hash"))
+            }
         )
     return set.intersection(*admission_sets) if admission_sets else None
 
@@ -190,6 +199,7 @@ def export_sft(
     raw_grades = _jsonl(Path(grades_path))
     grades = _select_grades(raw_grades, judge_model)
     admitted_hashes = _admitted_task_hashes(
+        task_views={canonical_hash(task): student_view_hash(task) for task in tasks.values()},
         preflight_path=preflight_path,
         verification_path=verification_path,
         preflight_model=preflight_model,

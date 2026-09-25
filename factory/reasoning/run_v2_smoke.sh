@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode-v2}"
 DATA_ROOT="${SCICODE_DATA_ROOT:-/root/ScienceIDE-workspace/SciCode}"
-OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-v2-smoke}"
+OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-v2-smoke-final}"
 PYTHON_BIN="${SCICODE_FACTORY_PYTHON:-/root/scicode-factory-venv/bin/python}"
 MODEL="${SCICODE_LLM_MODEL:-Kimi-K3}"
 

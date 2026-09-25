@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from factory.reasoning.pipeline import run_pipeline
+from factory.reasoning.student_view import render_student_user, student_view_hash
 
 THINKING = "Derive the regimes, compare stable forms, and justify the selection."
 FINAL = "The stable method follows.\n```python\ndef method(x):\n    return x\n```"
@@ -311,6 +312,16 @@ class ReasoningPipelineTests(unittest.TestCase):
             )
             self.assertEqual(len(traces), 3)
             self.assertEqual(len(sft), 3)
+            task_by_id = {task['task_id']: task for task in tasks}
+            for trace in traces:
+                task = task_by_id[trace['task_id']]
+                self.assertEqual(trace['messages'][1]['content'], render_student_user(task))
+                self.assertEqual(trace['provenance']['student_view_hash'], student_view_hash(task))
+            for row in sft:
+                self.assertEqual(
+                    row['messages'][1]['content'],
+                    render_student_user(task_by_id[row['task_name']]),
+                )
             self.assertTrue(
                 all(row["messages"][-1]["reasoning_content"] for row in sft)
             )

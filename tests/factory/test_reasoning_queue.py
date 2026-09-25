@@ -18,6 +18,24 @@ from factory.reasoning.queue import (
 
 
 class ReasoningQueueTests(unittest.TestCase):
+    def test_existing_queue_progress_is_migrated_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'old.sqlite3'
+            queue = WorkQueue(path)
+            queue.enqueue('repo', 'one', {'expected_rows': 3})
+            queue.enqueue('repo', 'two', {'expected_rows': 5})
+            first = queue.claim('first')
+            queue.complete(first, {'sft_rows': 2})
+            queue.claim('second')
+            with contextlib.closing(sqlite3.connect(path)) as connection:
+                connection.execute('DROP TABLE job_progress')
+                connection.commit()
+            restored = WorkQueue(path)
+            self.assertEqual(
+                restored.row_progress(kinds=('repo',)),
+                {'completed': 2, 'reserved': 5},
+            )
+
     def test_progress_survives_restart_failure_and_expiry(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / 'jobs.sqlite3'

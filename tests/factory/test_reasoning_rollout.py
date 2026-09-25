@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from factory.reasoning.rollout import collect_trace, run_rollouts, trace_id_for
+from factory.reasoning.preflight import PREFLIGHT_POLICY
 from factory.reasoning.schema import canonical_hash, validate_trace
 from tests.factory_fixtures import task_for
 
@@ -29,6 +30,28 @@ def response():
 
 
 class ReasoningRolloutTests(unittest.TestCase):
+    def test_stale_visible_prompt_admission_cannot_start_solver(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            task = task_for()
+            tasks = root / 'tasks.jsonl'
+            preflight = root / 'preflight.jsonl'
+            tasks.write_text(json.dumps(task) + '\n', encoding='utf-8')
+            preflight.write_text(json.dumps({
+                'task_hash': canonical_hash(task),
+                'student_view_hash': 'stale',
+                'policy_version': PREFLIGHT_POLICY,
+                'accepted': True,
+                'critic': {'model': 'critic'},
+            }) + '\n', encoding='utf-8')
+            result = run_rollouts(
+                tasks, root / 'traces.jsonl', preflight_path=preflight,
+                preflight_model='critic', model='solver',
+                chat_fn=lambda *_a, **_k: self.fail('solver must not be called'),
+            )
+            self.assertEqual(result['not_admitted'], 1)
+            self.assertEqual(result['written'], 0)
+
     def test_trace_identity_includes_sampling_variant(self):
         task = task_for()
         first = trace_id_for(task, "solver", 0, "temperature-0.2")

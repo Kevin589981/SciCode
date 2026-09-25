@@ -466,14 +466,21 @@ class WorkQueue:
             return self._row_progress(connection, kinds=kinds)
 
     def renew(self, lease: JobLease, *, lease_seconds: float) -> bool:
-        now = time.time()
-        with contextlib.closing(self._connect()) as connection:
-            updated = connection.execute(
-                "UPDATE jobs SET lease_expires=?,updated_at=? WHERE job_id=? "
-                "AND status='leased' AND lease_owner=?",
-                (now + lease_seconds, now, lease.job_id, lease.worker),
-            ).rowcount
-        return updated == 1
+        deadline = time.monotonic() + max(30.0, self.busy_timeout)
+        while True:
+            try:
+                now = time.time()
+                with contextlib.closing(self._connect()) as connection:
+                    updated = connection.execute(
+                        "UPDATE jobs SET lease_expires=?,updated_at=? WHERE job_id=? "
+                        "AND status='leased' AND lease_owner=?",
+                        (now + lease_seconds, now, lease.job_id, lease.worker),
+                    ).rowcount
+                return updated == 1
+            except sqlite3.OperationalError as exc:
+                if 'locked' not in str(exc).lower() or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.2)
 
     def complete(self, lease: JobLease, result: dict) -> None:
         now = time.time()
@@ -737,20 +744,27 @@ class WorkQueue:
     def renew_slot(self, lease: SlotLease, *, lease_seconds: float) -> bool:
         if lease_seconds <= 0:
             raise QueueError("slot lease_seconds must be positive")
-        now = time.time()
-        with contextlib.closing(self._connect()) as connection:
-            updated = connection.execute(
-                "UPDATE resource_slots SET lease_expires=?,updated_at=? "
-                "WHERE resource=? AND slot=? AND holder=?",
-                (
-                    now + lease_seconds,
-                    now,
-                    lease.resource,
-                    lease.slot,
-                    lease.holder,
-                ),
-            ).rowcount
-        return updated == 1
+        deadline = time.monotonic() + max(30.0, self.busy_timeout)
+        while True:
+            try:
+                now = time.time()
+                with contextlib.closing(self._connect()) as connection:
+                    updated = connection.execute(
+                        "UPDATE resource_slots SET lease_expires=?,updated_at=? "
+                        "WHERE resource=? AND slot=? AND holder=?",
+                        (
+                            now + lease_seconds,
+                            now,
+                            lease.resource,
+                            lease.slot,
+                            lease.holder,
+                        ),
+                    ).rowcount
+                return updated == 1
+            except sqlite3.OperationalError as exc:
+                if 'locked' not in str(exc).lower() or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.2)
 
     @contextlib.contextmanager
     def slot(
@@ -862,20 +876,29 @@ class LeaseHeartbeat:
         self.lease_seconds = lease_seconds
         self.interval = max(1.0, lease_seconds / 3)
         self._stop = threading.Event()
+        self._lost: str | None = None
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self) -> None:
         while not self._stop.wait(self.interval):
-            if not self.queue.renew(self.lease, lease_seconds=self.lease_seconds):
+            try:
+                renewed = self.queue.renew(self.lease, lease_seconds=self.lease_seconds)
+            except Exception as exc:
+                self._lost = f"renewal failed: {type(exc).__name__}: {exc}"
+                return
+            if not renewed:
+                self._lost = "job lease ownership was lost"
                 return
 
     def __enter__(self):
         self._thread.start()
         return self
 
-    def __exit__(self, _exc_type, _exc, _tb):
+    def __exit__(self, exc_type, _exc, _tb):
         self._stop.set()
         self._thread.join(timeout=self.interval + 1)
+        if self._lost and exc_type is None:
+            raise QueueError(self._lost)
 
 
 class ScheduledChat:

@@ -275,6 +275,9 @@ def worker_loop(
             )
         if lease is None:
             if coordinator is not None:
+                if (target_sft_rows is not None and
+                    coordinator.progress['completed'] >= target_sft_rows):
+                    counts['target_reached'] = coordinator.progress['completed']
                 break
             progress = _retry_sqlite_lock(lambda: queue.row_progress(kinds=(JOB_KIND,)))
             if target_sft_rows is not None and progress["completed"] >= target_sft_rows:
@@ -339,11 +342,25 @@ class LocalBatchCoordinator:
         self.target_rows = target_rows
         self.condition = threading.Condition()
         self.progress = queue.row_progress(kinds=(JOB_KIND,))
+        self.states = queue.counts()
+        self._last_state_refresh = time.monotonic()
+        self._terminal = False
+
+    def _refresh_states(self, *, force: bool = False):
+        now = time.monotonic()
+        if force or now - self._last_state_refresh >= 30.0:
+            self.states = self.queue.counts()
+            self._last_state_refresh = now
 
     def claim(self, worker: str, lease_seconds: float, target_rows: int | None):
         with self.condition:
             while True:
+                if self._terminal:
+                    return None
+                self._refresh_states()
                 if target_rows is not None and self.progress['completed'] >= target_rows:
+                    self._terminal = True
+                    self.condition.notify_all()
                     return None
                 if target_rows is None or (
                     self.progress['completed'] + self.progress['reserved'] < target_rows
@@ -357,10 +374,17 @@ class LocalBatchCoordinator:
                         )
                     )
                     if lease is not None:
+                        self.states['pending'] = self.states.get('pending', 0) - 1
+                        self.states['leased'] = self.states.get('leased', 0) + 1
+                        if self.states['pending'] < 0:
+                            self._refresh_states(force=True)
                         self.progress = self.queue.row_progress(kinds=(JOB_KIND,))
                         return lease
-                states = self.queue.counts()
-                if not states.get('pending', 0) and not states.get('leased', 0):
+                if not self.states.get('pending', 0) and not self.states.get('leased', 0):
+                    self._refresh_states(force=True)
+                if not self.states.get('pending', 0) and not self.states.get('leased', 0):
+                    self._terminal = True
+                    self.condition.notify_all()
                     return None
                 # Complete/fail wakes all waiters; timed wake handles retry delays
                 # and expired leases even if the owner process disappeared.
@@ -370,11 +394,14 @@ class LocalBatchCoordinator:
     def complete(self, lease: JobLease, result: dict):
         with self.condition:
             _retry_sqlite_lock(lambda: self.queue.complete(lease, result))
+            self.states['leased'] = self.states.get('leased', 0) - 1
+            self.states['done'] = self.states.get('done', 0) + 1
             self.progress = self.queue.row_progress(kinds=(JOB_KIND,))
             if (self.target_rows is not None and
                 self.progress['completed'] >= self.target_rows) or not any(
-                self.queue.counts().get(state, 0) for state in ('pending', 'leased')
+                self.states.get(state, 0) for state in ('pending', 'leased')
             ):
+                self._terminal = True
                 self.condition.notify_all()
             else:
                 self.condition.notify(1)
@@ -384,8 +411,14 @@ class LocalBatchCoordinator:
             status = _retry_sqlite_lock(
                 lambda: self.queue.fail(lease, error, retry_delay=delay)
             )
+            self.states['leased'] = self.states.get('leased', 0) - 1
+            self.states[status] = self.states.get(status, 0) + 1
             self.progress = self.queue.row_progress(kinds=(JOB_KIND,))
-            self.condition.notify(1)
+            if not any(self.states.get(state, 0) for state in ('pending', 'leased')):
+                self._terminal = True
+                self.condition.notify_all()
+            else:
+                self.condition.notify(1)
             return status
 
 

@@ -7,7 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from factory.reasoning.batch import (
+    BatchError,
     aggregate_sft,
+    controller_lock,
     enqueue_catalog,
     run_local_workers,
     worker_loop,
@@ -39,6 +41,14 @@ def sft_row(index):
 
 
 class ReasoningBatchTests(unittest.TestCase):
+    def test_batch_controller_excludes_another_controller(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / 'batch.sqlite3'
+            with controller_lock(db, exclusive=True):
+                with self.assertRaises(BatchError):
+                    with controller_lock(db, exclusive=False):
+                        pass
+
     def test_500_workers_finish_without_claim_polling_or_lost_progress(self):
         with tempfile.TemporaryDirectory() as td:
             queue = WorkQueue(Path(td) / 'batch.sqlite3')

@@ -118,6 +118,7 @@ class ReasoningExportTests(unittest.TestCase):
                     json.dumps(
                         {
                             "task_hash": row["task_hash"],
+                            "student_view_hash": row["provenance"]["student_view_hash"],
                             "accepted": True,
                             "policy_version": PREFLIGHT_POLICY,
                             "critic": {"model": "critic"},
@@ -134,12 +135,14 @@ class ReasoningExportTests(unittest.TestCase):
                     for row in (
                         {
                             "task_hash": admitted_trace["task_hash"],
+                            "student_view_hash": admitted_trace["provenance"]["student_view_hash"],
                             "accepted": True,
                             "policy_version": VERIFICATION_POLICY,
                             "verifier": {"model": "verifier"},
                         },
                         {
                             "task_hash": blocked_trace["task_hash"],
+                            "student_view_hash": blocked_trace["provenance"]["student_view_hash"],
                             "accepted": True,
                             "policy_version": "obsolete-source-policy",
                             "verifier": {"model": "verifier"},
