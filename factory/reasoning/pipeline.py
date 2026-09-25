@@ -17,6 +17,7 @@ from .grade import run_grading
 from .preflight import run_preflight
 from .rollout import current_commit, run_rollouts
 from .schema import ARCHETYPES, canonical_hash
+from .student_view import STUDENT_VIEW_POLICY
 from .verify import run_verification
 
 RUN_SCHEMA = "scicode-reasoning-run-v1"
@@ -178,6 +179,7 @@ def run_pipeline(
                 "solver_model": solver_model,
                 "temperature": solver_temperature,
                 "max_tokens": solver_max_tokens,
+                "student_view_policy": STUDENT_VIEW_POLICY,
             }
         )[:16],
     )
@@ -220,6 +222,7 @@ def run_pipeline(
     manifest = {
         "schema_version": RUN_SCHEMA,
         "factory_commit": factory_commit,
+        "student_view_policy": STUDENT_VIEW_POLICY,
         "started_at": started,
         "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "endpoint": os.environ.get("SCICODE_LLM_BASE_URL"),

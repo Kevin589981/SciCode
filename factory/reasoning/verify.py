@@ -11,9 +11,10 @@ from pathlib import Path
 from ..author import llm
 from .author import _json_objects
 from .schema import SchemaError, canonical_hash, validate_task
+from .student_view import render_student_user, student_view_hash
 
 VERIFICATION_SCHEMA = "scicode-task-verification-v1"
-VERIFICATION_POLICY = "source-grounding-v1"
+VERIFICATION_POLICY = "source-grounding-v2"
 SCORE_NAMES = (
     "scientific_validity",
     "source_grounding",
@@ -78,14 +79,6 @@ def _grounded_evidence(evidence: list[dict], source: str) -> list[dict]:
 
 
 def _verification_prompt(task: dict) -> str:
-    view = {
-        "archetype": task["archetype"],
-        "source": task["source"],
-        "problem": task["problem"],
-        "deliverable": task["deliverable"],
-        "reasoning_contract": task["reasoning_contract"],
-        "archetype_payload": task["archetype_payload"],
-    }
     return f"""You are an independent scientific task verifier, not a solver.
 
 Check whether the authored problem is scientifically defensible, answerable from
@@ -97,8 +90,11 @@ For every evidence item, copy an exact nontrivial quote from `source.source`.
 Do not invent line numbers or paraphrase the quote. A deterministic checker will
 reject quotes that do not occur in the source.
 
-TASK AND PRIVATE SOURCE:
-{json.dumps(view, ensure_ascii=False, indent=2)}
+STUDENT-VISIBLE PROMPT (check answerability and shortcuts from this alone):
+{render_student_user(task)}
+
+PRIVATE SOURCE (grounding evidence only; it cannot repair missing student inputs):
+{json.dumps(task['source'], ensure_ascii=False, indent=2)}
 
 Return ONLY one JSON object:
 {{
@@ -110,6 +106,8 @@ Return ONLY one JSON object:
     "shortcut_resistance": 0
   }},
   "fatal_issues": ["empty unless the task is unusable"],
+  "missing_inputs": [],
+  "answer_exposed": false,
   "evidence": [
     {{
       "claim": "task claim or requirement being checked",
@@ -176,6 +174,14 @@ def verify_task(
         not isinstance(item, str) for item in fatal_issues
     ):
         raise VerificationError("fatal_issues must be a string list")
+    missing_inputs = value.get("missing_inputs")
+    answer_exposed = value.get("answer_exposed")
+    if not isinstance(missing_inputs, list) or any(
+        not isinstance(item, str) for item in missing_inputs
+    ):
+        raise VerificationError("missing_inputs must be a string list")
+    if not isinstance(answer_exposed, bool):
+        raise VerificationError("answer_exposed must be a boolean")
     rationale = value.get("rationale")
     if not isinstance(rationale, str) or not rationale.strip():
         raise VerificationError("rationale must be nonempty")
@@ -183,6 +189,8 @@ def verify_task(
     clean_fatal = [item.strip() for item in fatal_issues if item.strip()]
     accepted = (
         not clean_fatal
+        and not missing_inputs
+        and not answer_exposed
         and scores["scientific_validity"] >= 3
         and scores["source_grounding"] >= 3
         and scores["answerability"] >= 3
@@ -196,8 +204,11 @@ def verify_task(
         "task_hash": canonical_hash(task),
         "accepted": accepted,
         "policy_version": VERIFICATION_POLICY,
+        "student_view_hash": student_view_hash(task),
         "scores": {name: scores[name] for name in SCORE_NAMES},
         "fatal_issues": clean_fatal,
+        "missing_inputs": missing_inputs,
+        "answer_exposed": answer_exposed,
         "evidence": evidence,
         "rationale": rationale,
         "verifier": {

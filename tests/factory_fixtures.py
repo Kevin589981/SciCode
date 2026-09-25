@@ -76,6 +76,7 @@ def task_for(archetype="derive_implement"):
 
 def trace_for(task=None, *, outcome="fail"):
     task = task or task_for()
+    from factory.reasoning.student_view import render_student_user, student_view_hash
     return {
         "schema_version": TRACE_SCHEMA,
         "trace_id": f"{task['task_id']}::fake-solver::0",
@@ -86,7 +87,7 @@ def trace_for(task=None, *, outcome="fail"):
         "max_tokens": 16384,
         "messages": [
             {"role": "system", "content": "Solve the scientific task."},
-            {"role": "user", "content": task["problem"]["question"]},
+            {"role": "user", "content": render_student_user(task)},
             {
                 "role": "assistant",
                 "reasoning_content": "I derive the asymptotes and compare stable forms.",
@@ -96,7 +97,11 @@ def trace_for(task=None, *, outcome="fail"):
         "outcome": {"status": outcome, "kind": "auxiliary_check"},
         "usage": {"completion_tokens": 200},
         "timing_sec": 1.5,
-        "provenance": {"factory_commit": "abc123", "task_set_hash": "def456"},
+        "provenance": {
+            "factory_commit": "abc123",
+            "task_set_hash": "def456",
+            "student_view_hash": student_view_hash(task),
+        },
     }
 
 

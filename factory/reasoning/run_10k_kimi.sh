@@ -24,14 +24,15 @@ EOF
   exit 0
 fi
 
-REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode}"
-OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-10k-v1}"
-CACHE_ROOT="${SCICODE_CACHE_ROOT:-${REPO_ROOT}/.cache/reasoning-repositories}"
+REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode-v2}"
+DATA_ROOT="${SCICODE_DATA_ROOT:-/root/ScienceIDE-workspace/SciCode}"
+OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-10k-v2}"
+CACHE_ROOT="${SCICODE_CACHE_ROOT:-${DATA_ROOT}/.cache/reasoning-repositories}"
 PYTHON_BIN="${SCICODE_FACTORY_PYTHON:-/root/scicode-factory-venv/bin/python}"
 METRICS_URL="${SCICODE_LLM_METRICS_URL:-http://10.100.184.127:29000/metrics}"
 MODEL="${SCICODE_LLM_MODEL:-Kimi-K3}"
-SCICODEPILE_CATALOG="${SCICODEPILE_CATALOG:-${REPO_ROOT}/.cache/scicodepile/catalog.jsonl}"
-EXPANDED_CATALOG="${SCICODEPILE_EXPANDED_CATALOG:-${REPO_ROOT}/.cache/scicodepile/catalog-10k.jsonl}"
+SCICODEPILE_CATALOG="${SCICODEPILE_CATALOG:-${DATA_ROOT}/.cache/scicodepile/catalog.jsonl}"
+EXPANDED_CATALOG="${SCICODEPILE_EXPANDED_CATALOG:-${DATA_ROOT}/.cache/scicodepile/catalog-10k.jsonl}"
 
 export SCICODE_LLM_BASE_URL="${SCICODE_LLM_BASE_URL:-http://10.100.184.127:5050/v1}"
 export SCICODE_LLM_API_KEY="${SCICODE_LLM_API_KEY:-dummy}"
@@ -66,8 +67,8 @@ RECIPE_ARGS=(
 
 if [[ "${MODE}" == "--prepare-and-enqueue" ]]; then
   "${PYTHON_BIN}" -m factory.reasoning.scicodepile_dataset \
-    --raw-dir "${REPO_ROOT}/.cache/scicodepile/raw" \
-    --prepared-root "${REPO_ROOT}/.cache/scicodepile/prepared" \
+    --raw-dir "${DATA_ROOT}/.cache/scicodepile/raw" \
+    --prepared-root "${DATA_ROOT}/.cache/scicodepile/prepared" \
     --catalog "${EXPANDED_CATALOG}" \
     --repository-limit 19559 \
     --skip-download
@@ -95,8 +96,9 @@ if [[ ! -s "${SCICODEPILE_CATALOG}" ]]; then
 fi
 
 # The controller polls METRICS_URL every 30 seconds. It estimates other users'
-# traffic as deployment_active - this_queue_active, then admits between 500 and
-# 1792 local calls. SQLite leases keep this bound global across all local workers.
+# traffic as deployment_active - this_process_active, then admits between 500
+# and 1792 calls. In-process slots avoid a SQLite write per request. Run only
+# one controller per v2 queue; external worker mode retains durable DB slots.
 exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --output-root "${OUTPUT_ROOT}" \
   --cache-root "${CACHE_ROOT}" \

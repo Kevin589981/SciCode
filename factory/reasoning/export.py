@@ -11,6 +11,7 @@ from pathlib import Path
 from .grade import GRADE_POLICY_VERSION, GradeError, current_grades
 from .preflight import PREFLIGHT_POLICY
 from .schema import validate_grade, validate_task, validate_trace
+from .student_view import render_student_user, student_view_hash
 from .verify import VERIFICATION_POLICY
 
 SFT_SCHEMA = "scicode-reasoning-sft-v1"
@@ -236,6 +237,13 @@ def export_sft(
             counts["ungraded"] += 1
             continue
         validate_grade(grade, trace)
+        if (trace.get('provenance') or {}).get('student_view_hash') != student_view_hash(task):
+            raise ExportError(f"trace {trace['trace_id']} has a stale student view")
+        if not any(
+            message.get('role') == 'user' and message.get('content') == render_student_user(task)
+            for message in trace['messages']
+        ):
+            raise ExportError(f"trace {trace['trace_id']} does not contain the current task prompt")
         status = (trace.get("outcome") or {}).get("status", "unknown")
         if not grade["trainable"]:
             counts["rejected"] += 1

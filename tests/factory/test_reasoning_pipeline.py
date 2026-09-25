@@ -23,6 +23,8 @@ def critic_response():
                                 "nontriviality": 4,
                             },
                             "shallow_failure_mode": None,
+                            "missing_inputs": [],
+                            "answer_exposed": False,
                             "rationale": "Dependent scientific decisions are explicit.",
                         }
                     )
@@ -83,6 +85,8 @@ def verifier_response():
                                 "shortcut_resistance": 3,
                             },
                             "fatal_issues": [],
+                            "missing_inputs": [],
+                            "answer_exposed": False,
                             "evidence": [
                                 {
                                     "claim": "A scientific model is explicitly evaluated.",

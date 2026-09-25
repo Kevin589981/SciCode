@@ -39,6 +39,26 @@ def sft_row(index):
 
 
 class ReasoningBatchTests(unittest.TestCase):
+    def test_500_workers_finish_without_claim_polling_or_lost_progress(self):
+        with tempfile.TemporaryDirectory() as td:
+            queue = WorkQueue(Path(td) / 'batch.sqlite3')
+            for index in range(60):
+                queue.enqueue('reasoning_repository', str(index), {'expected_rows': 1})
+            results = run_local_workers(
+                queue,
+                workers=500,
+                processor_factory=lambda _worker: (
+                    lambda _lease: {'status': 'complete', 'sft_rows': 1}
+                ),
+                target_sft_rows=60,
+            )
+            self.assertEqual(sum(row['completed'] for row in results), 60)
+            self.assertEqual(queue.counts(), {'done': 60})
+            self.assertEqual(
+                queue.row_progress(kinds=('reasoning_repository',)),
+                {'completed': 60, 'reserved': 0},
+            )
+
     def test_worker_retries_transient_sqlite_claim_lock(self):
         with tempfile.TemporaryDirectory() as td:
             queue = WorkQueue(Path(td) / "batch.sqlite3")
@@ -89,6 +109,7 @@ class ReasoningBatchTests(unittest.TestCase):
             self.assertEqual(result["requeued_leased"], 1)
             self.assertEqual(result["completed_rejections_preserved"], 1)
             self.assertEqual(queue.counts(), {"pending": 2, "done": 1})
+            self.assertEqual(queue.row_progress(), {'completed': 0, 'reserved': 0})
             resumed = queue.claim("resumed")
             self.assertTrue(resumed.payload["recipe"]["resume_complete"])
             self.assertEqual(

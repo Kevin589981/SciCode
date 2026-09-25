@@ -28,6 +28,8 @@ def critic_response(scores=None):
                     "content": json.dumps(
                         {
                             "scores": scores,
+                            "missing_inputs": [],
+                            "answer_exposed": False,
                             "shallow_failure_mode": None,
                             "rationale": "The task requires dependent scientific decisions.",
                         }

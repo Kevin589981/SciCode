@@ -22,6 +22,8 @@ def verifier_response(*, quote_two="return x / (1 + abs(x))", fatal=None):
             "shortcut_resistance": 3,
         },
         "fatal_issues": fatal or [],
+        "missing_inputs": [],
+        "answer_exposed": False,
         "evidence": [
             {
                 "claim": "The requested symbol exists.",

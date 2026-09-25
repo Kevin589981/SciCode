@@ -87,6 +87,27 @@ def repair(
             "WHERE holder IS NOT NULL",
             (now,),
         )
+        # This maintenance path mutates jobs outside WorkQueue. Rebuild the
+        # materialized progress in the same transaction before workers resume.
+        if source.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_progress'"
+        ).fetchone():
+            source.execute("DELETE FROM job_progress")
+            totals = {}
+            for row in source.execute(
+                "SELECT kind,status,payload_json,result_json FROM jobs "
+                "WHERE status IN ('done','leased')"
+            ):
+                values = totals.setdefault(row['kind'], [0, 0])
+                if row['status'] == 'done' and row['result_json']:
+                    values[0] += max(0, int(json.loads(row['result_json']).get('sft_rows') or 0))
+                elif row['status'] == 'leased':
+                    values[1] += max(0, int(json.loads(row['payload_json']).get('expected_rows') or 0))
+            for kind, values in totals.items():
+                source.execute(
+                    "INSERT INTO job_progress(kind,completed_rows,reserved_rows) VALUES(?,?,?)",
+                    (kind, *values),
+                )
         source.commit()
     return {"backup": str(backup_path), "factory_commit": commit, **counts}
 

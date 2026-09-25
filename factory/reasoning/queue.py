@@ -154,6 +154,13 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_claim_idx
     ON jobs(status, next_eligible, priority DESC, created_at);
+CREATE INDEX IF NOT EXISTS jobs_expiry_idx ON jobs(status, lease_expires);
+
+CREATE TABLE IF NOT EXISTS job_progress (
+    kind TEXT PRIMARY KEY,
+    completed_rows INTEGER NOT NULL DEFAULT 0,
+    reserved_rows INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS job_events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,7 +256,28 @@ class WorkQueue:
                             f"filesystem selected SQLite journal mode {actual}, not "
                             f"{desired}"
                         )
+                has_progress = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_progress'"
+                ).fetchone() is not None
                 connection.executescript(SCHEMA)
+                if not has_progress:
+                    # One-time migration of an old queue. Never scan jobs on claim.
+                    rows = connection.execute(
+                        "SELECT kind,status,payload_json,result_json FROM jobs "
+                        "WHERE status IN ('done','leased')"
+                    ).fetchall()
+                    totals: dict[str, list[int]] = {}
+                    for row in rows:
+                        values = totals.setdefault(row['kind'], [0, 0])
+                        if row['status'] == 'done' and row['result_json']:
+                            values[0] += self._rows(row['result_json'], 'sft_rows')
+                        elif row['status'] == 'leased':
+                            values[1] += self._rows(row['payload_json'], 'expected_rows')
+                    for kind, values in totals.items():
+                        connection.execute(
+                            "INSERT INTO job_progress VALUES(?,?,?)",
+                            (kind, *values),
+                        )
         except sqlite3.OperationalError as exc:
             raise QueueError(
                 f"cannot initialize SQLite queue at {self.path}: {exc}. "
@@ -269,6 +297,21 @@ class WorkQueue:
             "INSERT INTO job_events(job_id,event,worker,detail,created_at) "
             "VALUES(?,?,?,?,?)",
             (job_id, event, worker, detail, time.time()),
+        )
+
+    @staticmethod
+    def _rows(raw: str, key: str) -> int:
+        return max(0, int(json.loads(raw).get(key, 0) or 0))
+
+    @staticmethod
+    def _progress_delta(connection, kind: str, *, completed: int = 0, reserved: int = 0):
+        connection.execute(
+            "INSERT OR IGNORE INTO job_progress(kind) VALUES(?)", (kind,)
+        )
+        connection.execute(
+            "UPDATE job_progress SET completed_rows=completed_rows+?, "
+            "reserved_rows=reserved_rows+? WHERE kind=?",
+            (completed, reserved, kind),
         )
 
     def enqueue(
@@ -302,16 +345,23 @@ class WorkQueue:
             )
             inserted = cursor.rowcount == 1
             if inserted:
+                connection.execute(
+                    "INSERT OR IGNORE INTO job_progress(kind) VALUES(?)", (kind,)
+                )
                 self._event(connection, job_id, "enqueued")
         return job_id, inserted
 
     def _recover_expired(self, connection: sqlite3.Connection, now: float) -> None:
         expired = connection.execute(
-            "SELECT job_id,attempts,max_attempts,lease_owner FROM jobs "
+            "SELECT job_id,kind,payload_json,attempts,max_attempts,lease_owner FROM jobs "
             "WHERE status='leased' AND lease_expires < ?",
             (now,),
         ).fetchall()
         for row in expired:
+            self._progress_delta(
+                connection, row['kind'],
+                reserved=-self._rows(row['payload_json'], 'expected_rows'),
+            )
             status = "pending" if row["attempts"] < row["max_attempts"] else "failed"
             connection.execute(
                 "UPDATE jobs SET status=?,lease_owner=NULL,lease_expires=NULL,"
@@ -375,6 +425,10 @@ class WorkQueue:
                 if updated != 1:
                     raise QueueError("atomic claim lost its selected job")
                 self._event(connection, row["job_id"], "claimed", worker)
+                self._progress_delta(
+                    connection, row['kind'],
+                    reserved=self._rows(row['payload_json'], 'expected_rows'),
+                )
                 connection.execute("COMMIT")
             except Exception:
                 connection.execute("ROLLBACK")
@@ -398,22 +452,14 @@ class WorkQueue:
         kind_clause = ""
         if kinds:
             marks = ",".join("?" for _ in kinds)
-            kind_clause = f" AND kind IN ({marks})"
+            kind_clause = f" WHERE kind IN ({marks})"
             parameters.extend(kinds)
-        rows = connection.execute(
-            "SELECT status,payload_json,result_json FROM jobs "
-            "WHERE status IN ('leased','done')" + kind_clause,
+        row = connection.execute(
+            "SELECT COALESCE(SUM(completed_rows),0), "
+            "COALESCE(SUM(reserved_rows),0) FROM job_progress" + kind_clause,
             parameters,
-        ).fetchall()
-        completed = reserved = 0
-        for row in rows:
-            if row["status"] == "done" and row["result_json"]:
-                value = json.loads(row["result_json"]).get("sft_rows", 0)
-                completed += max(0, int(value or 0))
-            elif row["status"] == "leased":
-                value = json.loads(row["payload_json"]).get("expected_rows", 0)
-                reserved += max(0, int(value or 0))
-        return {"completed": completed, "reserved": reserved}
+        ).fetchone()
+        return {"completed": int(row[0]), "reserved": int(row[1])}
 
     def row_progress(self, *, kinds: tuple[str, ...] | None = None) -> dict[str, int]:
         with contextlib.closing(self._connect()) as connection:
@@ -434,6 +480,13 @@ class WorkQueue:
         with contextlib.closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                row = connection.execute(
+                    "SELECT kind,payload_json FROM jobs WHERE job_id=? AND "
+                    "status='leased' AND lease_owner=?",
+                    (lease.job_id, lease.worker),
+                ).fetchone()
+                if row is None:
+                    raise QueueError(f"job lease is no longer owned: {lease.job_id}")
                 updated = connection.execute(
                     "UPDATE jobs SET status='done',result_json=?,"
                     "lease_owner=NULL,lease_expires=NULL,updated_at=? "
@@ -442,6 +495,11 @@ class WorkQueue:
                 ).rowcount
                 if updated != 1:
                     raise QueueError(f"job lease is no longer owned: {lease.job_id}")
+                self._progress_delta(
+                    connection, row['kind'],
+                    completed=max(0, int(result.get('sft_rows', 0) or 0)),
+                    reserved=-self._rows(row['payload_json'], 'expected_rows'),
+                )
                 self._event(connection, lease.job_id, "completed", lease.worker)
                 connection.execute("COMMIT")
             except Exception:
@@ -461,12 +519,16 @@ class WorkQueue:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 row = connection.execute(
-                    "SELECT attempts,max_attempts FROM jobs WHERE job_id=? "
+                    "SELECT kind,payload_json,attempts,max_attempts FROM jobs WHERE job_id=? "
                     "AND status='leased' AND lease_owner=?",
                     (lease.job_id, lease.worker),
                 ).fetchone()
                 if row is None:
                     raise QueueError(f"job lease is no longer owned: {lease.job_id}")
+                self._progress_delta(
+                    connection, row['kind'],
+                    reserved=-self._rows(row['payload_json'], 'expected_rows'),
+                )
                 will_retry = retryable and row["attempts"] < row["max_attempts"]
                 status = "pending" if will_retry else "failed"
                 connection.execute(
@@ -657,13 +719,20 @@ class WorkQueue:
             time.sleep(poll_interval)
 
     def release_slot(self, lease: SlotLease) -> bool:
-        with contextlib.closing(self._connect()) as connection:
-            updated = connection.execute(
-                "UPDATE resource_slots SET holder=NULL,lease_expires=NULL,"
-                "updated_at=? WHERE resource=? AND slot=? AND holder=?",
-                (time.time(), lease.resource, lease.slot, lease.holder),
-            ).rowcount
-        return updated == 1
+        deadline = time.monotonic() + max(30.0, self.busy_timeout)
+        while True:
+            try:
+                with contextlib.closing(self._connect()) as connection:
+                    updated = connection.execute(
+                        "UPDATE resource_slots SET holder=NULL,lease_expires=NULL,"
+                        "updated_at=? WHERE resource=? AND slot=? AND holder=?",
+                        (time.time(), lease.resource, lease.slot, lease.holder),
+                    ).rowcount
+                return updated == 1
+            except sqlite3.OperationalError as exc:
+                if 'locked' not in str(exc).lower() or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.2)
 
     def renew_slot(self, lease: SlotLease, *, lease_seconds: float) -> bool:
         if lease_seconds <= 0:
@@ -729,6 +798,59 @@ class WorkQueue:
             self.release_slot(lease)
             if lost and not body_failed:
                 raise QueueError(f"resource slot {resource!r} became unsafe: {lost[0]}")
+
+
+class LocalSlotManager:
+    """Process-owned slots: no SQLite write per model request or repository."""
+
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._limits: dict[str, int] = {}
+        self._active: dict[str, int] = {}
+
+    def configure_slots(self, resource: str, count: int) -> None:
+        if not resource or count < 1:
+            raise QueueError("resource must be nonempty and count positive")
+        with self._condition:
+            previous = self._limits.setdefault(resource, count)
+            if previous != count:
+                raise QueueError(f"resource {resource!r} has conflicting slot counts")
+            self._condition.notify_all()
+
+    @contextlib.contextmanager
+    def slot(
+        self,
+        resource: str,
+        holder_prefix: str,
+        *,
+        lease_seconds: float,
+        wait_timeout: float = 86_400,
+        capacity_controller: MetricsCapacityController | None = None,
+    ):
+        deadline = time.monotonic() + wait_timeout
+        while True:
+            if capacity_controller is not None:
+                capacity_controller.refresh()
+            with self._condition:
+                if resource not in self._limits:
+                    raise QueueError(f"resource {resource!r} has no configured slots")
+                active = self._active.get(resource, 0)
+                limit = self._limits[resource]
+                if capacity_controller is not None:
+                    limit = min(limit, capacity_controller.limit(active))
+                if active < limit:
+                    self._active[resource] = active + 1
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise QueueError(f"timed out waiting for {resource!r} slot")
+                self._condition.wait(min(remaining, 1.0))
+        try:
+            yield SlotLease(resource, -1, holder_prefix)
+        finally:
+            with self._condition:
+                self._active[resource] -= 1
+                self._condition.notify_all()
 
 
 class LeaseHeartbeat:

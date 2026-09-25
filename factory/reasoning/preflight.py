@@ -17,9 +17,10 @@ from pathlib import Path
 from ..author import llm
 from .author import _json_objects
 from .schema import SchemaError, canonical_hash, validate_task
+from .student_view import render_student_user, student_view_hash
 
 PREFLIGHT_SCHEMA = "scicode-reasoning-preflight-v1"
-PREFLIGHT_POLICY = "reasoning-depth-v2"
+PREFLIGHT_POLICY = "reasoning-depth-v3"
 CRITIC_SCORE_NAMES = (
     "scientific_depth",
     "multi_step_dependency",
@@ -106,21 +107,15 @@ def _parse_object(text: str) -> dict:
 
 
 def _critic_prompt(task: dict) -> str:
-    visible = {
-        "archetype": task["archetype"],
-        "problem": task["problem"],
-        "deliverable": task["deliverable"],
-        "reasoning_contract": task["reasoning_contract"],
-        "archetype_payload": task["archetype_payload"],
-    }
     return f"""You are an independent critic of a scientific reasoning task.
 
 Judge whether solving the task requires dependent scientific reasoning rather
 than docstring translation, mechanical branching, source recall, or verbose but
-empty explanation. Do not solve the task. Use only the task specification below.
+empty explanation. Do not solve the task. Judge only the exact student-visible
+prompt below. Private source or rubric cannot repair missing inputs.
 
-TASK:
-{json.dumps(visible, ensure_ascii=False, indent=2)}
+STUDENT-VISIBLE PROMPT:
+{render_student_user(task)}
 
 Return ONLY this JSON object, using integer scores from 0 (absent) to 4 (strong):
 {{
@@ -130,6 +125,8 @@ Return ONLY this JSON object, using integer scores from 0 (absent) to 4 (strong)
     "decision_requirement": 0,
     "nontriviality": 0
   }},
+  "missing_inputs": [],
+  "answer_exposed": false,
   "shallow_failure_mode": null,
   "rationale": "specific evidence from the task"
 }}
@@ -180,11 +177,21 @@ def critic_task(
     rationale = value.get("rationale")
     if not isinstance(rationale, str) or not rationale.strip():
         raise PreflightError("critic rationale must be a nonempty string")
+    missing_inputs = value.get("missing_inputs")
+    answer_exposed = value.get("answer_exposed")
+    if not isinstance(missing_inputs, list) or any(
+        not isinstance(item, str) for item in missing_inputs
+    ):
+        raise PreflightError("missing_inputs must be a string list")
+    if not isinstance(answer_exposed, bool):
+        raise PreflightError("answer_exposed must be a boolean")
     return {
         "model": model or llm.client_config()["model"],
         "scores": {name: scores[name] for name in CRITIC_SCORE_NAMES},
         "shallow_failure_mode": shallow,
         "rationale": rationale,
+        "missing_inputs": missing_inputs,
+        "answer_exposed": answer_exposed,
         "usage": response.get("usage") or {},
     }
 
@@ -216,6 +223,8 @@ def preflight_task(
         and scores["scientific_depth"] >= 2
         and scores["multi_step_dependency"] >= 2
         and scores["nontriviality"] >= 2
+        and not critic["missing_inputs"]
+        and not critic["answer_exposed"]
     )
     return {
         "schema_version": PREFLIGHT_SCHEMA,
@@ -224,6 +233,7 @@ def preflight_task(
         "task_hash": canonical_hash(task),
         "accepted": structural["passed"] and semantic_pass,
         "policy_version": PREFLIGHT_POLICY,
+        "student_view_hash": student_view_hash(task),
         "structural": structural,
         "critic": critic,
     }

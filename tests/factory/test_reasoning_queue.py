@@ -9,6 +9,7 @@ from pathlib import Path
 
 from factory.reasoning.queue import (
     MetricsCapacityController,
+    LocalSlotManager,
     QueueError,
     ScheduledChat,
     WorkQueue,
@@ -17,6 +18,55 @@ from factory.reasoning.queue import (
 
 
 class ReasoningQueueTests(unittest.TestCase):
+    def test_progress_survives_restart_failure_and_expiry(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'jobs.sqlite3'
+            queue = WorkQueue(path)
+            for index in range(3):
+                queue.enqueue('repo', str(index), {'expected_rows': 4})
+            first = queue.claim('first', lease_seconds=0.02)
+            second = queue.claim('second', lease_seconds=10)
+            self.assertEqual(queue.row_progress(), {'completed': 0, 'reserved': 8})
+            queue.fail(second, 'transient', retry_delay=0)
+            self.assertEqual(queue.row_progress(), {'completed': 0, 'reserved': 4})
+            time.sleep(0.03)
+            third = queue.claim('third', lease_seconds=10)
+            self.assertIsNotNone(third)
+            self.assertEqual(queue.row_progress(), {'completed': 0, 'reserved': 4})
+            queue.complete(third, {'sft_rows': 2})
+            reopened = WorkQueue(path)
+            self.assertEqual(reopened.row_progress(), {'completed': 2, 'reserved': 0})
+            with contextlib.closing(sqlite3.connect(path)) as connection:
+                progress = connection.execute(
+                    'SELECT completed_rows,reserved_rows FROM job_progress WHERE kind=?',
+                    ('repo',),
+                ).fetchone()
+            self.assertEqual(progress, (2, 0))
+
+    def test_local_slots_release_on_error_at_high_concurrency(self):
+        slots = LocalSlotManager()
+        slots.configure_slots('llm', 25)
+        active = peak = 0
+        lock = threading.Lock()
+        def one(index):
+            nonlocal active, peak
+            try:
+                with slots.slot('llm', str(index), lease_seconds=1):
+                    with lock:
+                        active += 1
+                        peak = max(peak, active)
+                    time.sleep(0.002)
+                    with lock:
+                        active -= 1
+                    if index % 17 == 0:
+                        raise RuntimeError('simulated model failure')
+            except RuntimeError:
+                pass
+        with futures.ThreadPoolExecutor(max_workers=100) as pool:
+            list(pool.map(one, range(500)))
+        self.assertLessEqual(peak, 25)
+        self.assertEqual(slots._active['llm'], 0)
+
     def test_metrics_capacity_subtracts_local_activity_and_has_a_floor(self):
         metrics = """# HELP ignored
 smg_worker_requests_active{worker="a"} 600

@@ -17,13 +17,14 @@ from .schema import (
     validate_task,
     validate_trace,
 )
+from .student_view import render_student_user, student_view_hash
 
 
 class GradeError(ValueError):
     """A trace cannot be graded or a judge response is invalid."""
 
 
-GRADE_POLICY_VERSION = "reasoning-value-v2"
+GRADE_POLICY_VERSION = "reasoning-value-v3"
 
 
 def grade_id_for(trace: dict, model: str) -> str:
@@ -80,12 +81,6 @@ def _parse_object(text: str) -> dict:
 
 
 def _judge_prompt(task: dict, trace: dict) -> str:
-    task_view = {
-        "archetype": task["archetype"],
-        "problem": task["problem"],
-        "deliverable": task["deliverable"],
-        "reasoning_contract": task["reasoning_contract"],
-    }
     trace_view = {
         "messages": trace["messages"],
         "outcome": trace.get("outcome"),
@@ -105,8 +100,8 @@ the recorded check only as weak diagnostic evidence. Do not use it as the
 selection rule. Long text is not inherently valuable: penalize repetition,
 unsupported claims, dead loops, and confidently wrong scientific premises.
 
-TASK:
-{json.dumps(task_view, ensure_ascii=False, indent=2)}
+STUDENT-VISIBLE TASK (the only task information available to the solver):
+{render_student_user(task)}
 
 RECORDED TRACE (which may end before the final answer):
 {json.dumps(trace_view, ensure_ascii=False, indent=2)}
@@ -180,6 +175,14 @@ def judge_trace(
     trace = validate_trace(trace)
     if trace["task_id"] != task["task_id"] or trace["task_hash"] != canonical_hash(task):
         raise GradeError("trace does not match task content")
+    provenance = trace.get("provenance") or {}
+    if provenance.get("student_view_hash") != student_view_hash(task):
+        raise GradeError("trace was not generated under the current student-visible prompt")
+    if not any(
+        message.get('role') == 'user' and message.get('content') == render_student_user(task)
+        for message in trace['messages']
+    ):
+        raise GradeError("trace does not contain the current student-visible prompt")
     model = model or llm.client_config()["model"]
     prompt = _judge_prompt(task, trace)
     if len(prompt) > max_input_chars:

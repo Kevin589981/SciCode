@@ -59,6 +59,12 @@ operations such as deriving, comparing assumptions, diagnosing evidence,
 selecting a method, analyzing regimes, or revising a model. Reject in your own
 reasoning any task that reduces to translating a docstring, copying the source,
 or implementing branches mechanically.
+The solver will see problem.question, problem.background, deliverable.kind and
+requirements, and EVERY archetype_payload field, but will NOT see the source
+or reasoning_contract. All necessary observations, assumptions, alternatives,
+and criteria must be in those visible fields. Payload fields must state neutral
+givens, never the diagnosis, preferred alternative, derived result, or answer.
+Do not hide essential numerical values in reasoning_contract.evidence_expected.
 
 Task archetype: {archetype}
 {ARCHETYPE_GUIDANCE[archetype]}

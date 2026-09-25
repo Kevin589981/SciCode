@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as futures
+import contextlib
 import hashlib
 import json
 import os
@@ -31,6 +32,7 @@ from .discovery import (
 from .queue import (
     JobLease,
     LeaseHeartbeat,
+    LocalSlotManager,
     MetricsCapacityController,
     ScheduledChat,
     WorkQueue,
@@ -45,6 +47,37 @@ RECIPE_SCHEMA = "scicode-reasoning-recipe-v1"
 
 class BatchError(RuntimeError):
     """Batch inputs or completed shards are inconsistent."""
+
+
+@contextlib.contextmanager
+def controller_lock(db_path: Path, *, exclusive: bool):
+    """Keep process-local slots separate from external DB-slot workers."""
+    path = Path(str(db_path) + '.controller.lock')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a+b') as handle:
+        if os.name == 'nt':
+            import msvcrt
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise BatchError(f'another controller is using {db_path}') from exc
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            try:
+                fcntl.flock(handle, mode | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise BatchError(f'another controller is using {db_path}') from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _jsonl(path: Path) -> list[dict]:
@@ -129,6 +162,7 @@ def process_lease(
     chat_fn=llm.chat,
     job_lease_seconds: float = 14_400,
     capacity_controller: MetricsCapacityController | None = None,
+    slot_manager: LocalSlotManager | None = None,
 ) -> dict:
     """Process one leased repository under global repo and model budgets."""
     candidate = lease.payload.get("repository", lease.payload)
@@ -145,21 +179,22 @@ def process_lease(
             f"worker factory commit {running_commit} does not match recipe "
             f"{expected_commit}"
         )
+    slots = slot_manager or queue
     scheduled_chat = ScheduledChat(
-        queue,
+        slots,
         chat_fn,
         worker=lease.worker,
         capacity_controller=capacity_controller,
     )
     repo_resource = f"repo:{candidate['repo_id']}"
-    queue.configure_slots(repo_resource, 1)
+    slots.configure_slots(repo_resource, 1)
     output_dir = _output_dir(Path(output_root), lease)
     with LeaseHeartbeat(queue, lease, job_lease_seconds):
-        with queue.slot(
+        with slots.slot(
             "repository",
             lease.worker,
             lease_seconds=job_lease_seconds,
-        ), queue.slot(
+        ), slots.slot(
             repo_resource,
             lease.worker,
             lease_seconds=job_lease_seconds,
@@ -222,19 +257,25 @@ def worker_loop(
     max_jobs: int | None = None,
     job_lease_seconds: float = 14_400,
     target_sft_rows: int | None = None,
+    coordinator=None,
 ) -> dict:
     counts = {"completed": 0, "retried": 0, "failed": 0}
     handled = 0
     while max_jobs is None or handled < max_jobs:
-        lease = _retry_sqlite_lock(
-            lambda: queue.claim(
+        if coordinator is not None:
+            lease = coordinator.claim(worker, job_lease_seconds, target_sft_rows)
+        else:
+            lease = _retry_sqlite_lock(
+                lambda: queue.claim(
                 worker,
                 kinds=(JOB_KIND,),
                 lease_seconds=job_lease_seconds,
                 target_rows=target_sft_rows,
+                )
             )
-        )
         if lease is None:
+            if coordinator is not None:
+                break
             progress = _retry_sqlite_lock(lambda: queue.row_progress(kinds=(JOB_KIND,)))
             if target_sft_rows is not None and progress["completed"] >= target_sft_rows:
                 counts["target_reached"] = progress["completed"]
@@ -247,19 +288,25 @@ def worker_loop(
         handled += 1
         try:
             result = processor(lease)
-            _retry_sqlite_lock(lambda: queue.complete(lease, result))
+            if coordinator is not None:
+                coordinator.complete(lease, result)
+            else:
+                _retry_sqlite_lock(lambda: queue.complete(lease, result))
             counts["completed"] += 1
         except Exception as exc:
             delay = min(900.0, 15.0 * (2 ** max(0, lease.attempt - 1)))
             error_message = f"{type(exc).__name__}: {exc}"
-            status = _retry_sqlite_lock(
-                lambda: queue.fail(
+            if coordinator is not None:
+                status = coordinator.fail(lease, error_message, delay)
+            else:
+                status = _retry_sqlite_lock(
+                    lambda: queue.fail(
                     lease,
                     error_message,
                     retryable=True,
                     retry_delay=delay,
+                    )
                 )
-            )
             counts["retried" if status == "pending" else "failed"] += 1
     return counts
 
@@ -284,6 +331,64 @@ def _retry_sqlite_lock(operation, *, max_wait: float = 300.0):
             attempt += 1
 
 
+class LocalBatchCoordinator:
+    """Main-process queue owner; workers wait here instead of polling SQLite."""
+
+    def __init__(self, queue: WorkQueue, target_rows: int | None = None):
+        self.queue = queue
+        self.target_rows = target_rows
+        self.condition = threading.Condition()
+        self.progress = queue.row_progress(kinds=(JOB_KIND,))
+
+    def claim(self, worker: str, lease_seconds: float, target_rows: int | None):
+        with self.condition:
+            while True:
+                if target_rows is not None and self.progress['completed'] >= target_rows:
+                    return None
+                if target_rows is None or (
+                    self.progress['completed'] + self.progress['reserved'] < target_rows
+                ):
+                    lease = _retry_sqlite_lock(
+                        lambda: self.queue.claim(
+                            worker,
+                            kinds=(JOB_KIND,),
+                            lease_seconds=lease_seconds,
+                            target_rows=target_rows,
+                        )
+                    )
+                    if lease is not None:
+                        self.progress = self.queue.row_progress(kinds=(JOB_KIND,))
+                        return lease
+                states = self.queue.counts()
+                if not states.get('pending', 0) and not states.get('leased', 0):
+                    return None
+                # Complete/fail wakes all waiters; timed wake handles retry delays
+                # and expired leases even if the owner process disappeared.
+                self.condition.wait(30.0)
+                self.progress = self.queue.row_progress(kinds=(JOB_KIND,))
+
+    def complete(self, lease: JobLease, result: dict):
+        with self.condition:
+            _retry_sqlite_lock(lambda: self.queue.complete(lease, result))
+            self.progress = self.queue.row_progress(kinds=(JOB_KIND,))
+            if (self.target_rows is not None and
+                self.progress['completed'] >= self.target_rows) or not any(
+                self.queue.counts().get(state, 0) for state in ('pending', 'leased')
+            ):
+                self.condition.notify_all()
+            else:
+                self.condition.notify(1)
+
+    def fail(self, lease: JobLease, error: str, delay: float):
+        with self.condition:
+            status = _retry_sqlite_lock(
+                lambda: self.queue.fail(lease, error, retry_delay=delay)
+            )
+            self.progress = self.queue.row_progress(kinds=(JOB_KIND,))
+            self.condition.notify(1)
+            return status
+
+
 def run_local_workers(
     queue: WorkQueue,
     *,
@@ -295,6 +400,7 @@ def run_local_workers(
     if workers < 1:
         raise BatchError("workers must be positive")
     host = socket.gethostname()
+    coordinator = LocalBatchCoordinator(queue, target_sft_rows)
 
     def one(index):
         worker = f"{host}:{os.getpid()}:{index}:{threading.get_ident()}"
@@ -305,6 +411,7 @@ def run_local_workers(
             watch=True,
             job_lease_seconds=job_lease_seconds,
             target_sft_rows=target_sft_rows,
+            coordinator=coordinator,
         )
 
     with futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -560,6 +667,7 @@ def _processor(
     args,
     worker: str,
     capacity_controller: MetricsCapacityController | None = None,
+    slot_manager: LocalSlotManager | None = None,
 ):
     return lambda lease: process_lease(
         queue,
@@ -568,6 +676,7 @@ def _processor(
         output_root=args.output_root.resolve(),
         job_lease_seconds=args.job_lease_seconds,
         capacity_controller=capacity_controller,
+        slot_manager=slot_manager,
     )
 
 
@@ -705,30 +814,35 @@ def main() -> None:
         worker = args.worker or f"{socket.gethostname()}:{os.getpid()}"
         llm_slots = queue.configured_slots("llm")
         capacity_controller = _capacity_controller(args, maximum=llm_slots)
-        result = worker_loop(
-            queue,
-            worker=worker,
-            processor=_processor(queue, args, worker, capacity_controller),
-            watch=not args.no_watch,
-            max_jobs=args.max_jobs,
-            job_lease_seconds=args.job_lease_seconds,
-            target_sft_rows=args.target_sft_rows,
-        )
+        with controller_lock(args.db, exclusive=False):
+            result = worker_loop(
+                queue,
+                worker=worker,
+                processor=_processor(queue, args, worker, capacity_controller),
+                watch=not args.no_watch,
+                max_jobs=args.max_jobs,
+                job_lease_seconds=args.job_lease_seconds,
+                target_sft_rows=args.target_sft_rows,
+            )
         print(json.dumps({**result, "queue": queue.counts()}, indent=2))
         return
     if args.command == "resume":
         queue = WorkQueue(args.db)
         llm_slots = queue.configured_slots("llm")
+        local_slots = LocalSlotManager()
+        local_slots.configure_slots("llm", llm_slots)
+        local_slots.configure_slots("repository", queue.configured_slots("repository"))
         capacity_controller = _capacity_controller(args, maximum=llm_slots)
-        worker_results = run_local_workers(
-            queue,
-            workers=args.workers,
-            processor_factory=lambda worker: _processor(
-                queue, args, worker, capacity_controller
-            ),
-            job_lease_seconds=args.job_lease_seconds,
-            target_sft_rows=args.target_sft_rows,
-        )
+        with controller_lock(args.db, exclusive=True):
+            worker_results = run_local_workers(
+                queue,
+                workers=args.workers,
+                processor_factory=lambda worker: _processor(
+                    queue, args, worker, capacity_controller, local_slots
+                ),
+                job_lease_seconds=args.job_lease_seconds,
+                target_sft_rows=args.target_sft_rows,
+            )
         report = aggregate_sft(
             queue,
             args.output_root / "accepted-sft.jsonl",
@@ -846,15 +960,19 @@ def main() -> None:
         recipe=recipe_from_args(args),
     )
     capacity_controller = _capacity_controller(args, maximum=args.llm_slots)
-    worker_results = run_local_workers(
-        queue,
-        workers=args.workers,
-        processor_factory=lambda worker: _processor(
-            queue, args, worker, capacity_controller
-        ),
-        job_lease_seconds=args.job_lease_seconds,
-        target_sft_rows=args.target_sft_rows,
-    )
+    local_slots = LocalSlotManager()
+    local_slots.configure_slots("llm", args.llm_slots)
+    local_slots.configure_slots("repository", args.repository_slots)
+    with controller_lock(queue.path, exclusive=True):
+        worker_results = run_local_workers(
+            queue,
+            workers=args.workers,
+            processor_factory=lambda worker: _processor(
+                queue, args, worker, capacity_controller, local_slots
+            ),
+            job_lease_seconds=args.job_lease_seconds,
+            target_sft_rows=args.target_sft_rows,
+        )
     report = aggregate_sft(
         queue,
         output_root / "accepted-sft.jsonl",

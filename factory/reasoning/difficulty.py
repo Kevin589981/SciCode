@@ -14,6 +14,7 @@ from ..author import llm
 from .author import _json_objects
 from .rollout import run_rollouts
 from .schema import canonical_hash, validate_task, validate_trace
+from .student_view import render_student_user
 
 PANEL_SCHEMA = "scicode-difficulty-panel-v1"
 ASSESSMENT_SCHEMA = "scicode-solution-assessment-v1"
@@ -108,7 +109,7 @@ def _assessment_prompt(task: dict, trace: dict) -> str:
         "source": task["source"],
         "problem": task["problem"],
         "deliverable": task["deliverable"],
-        "reasoning_contract": task["reasoning_contract"],
+        "student_visible_prompt": render_student_user(task),
     }
     response = [
         message for message in trace["messages"] if message.get("role") == "assistant"

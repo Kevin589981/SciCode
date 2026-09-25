@@ -15,6 +15,7 @@ from pathlib import Path
 from ..author import llm
 from .preflight import PREFLIGHT_POLICY
 from .schema import TRACE_SCHEMA, canonical_hash, validate_task, validate_trace
+from .student_view import render_student_user, student_view_hash
 from .verify import VERIFICATION_POLICY
 
 
@@ -29,26 +30,10 @@ claim evidence you did not derive from the problem."""
 
 
 def solver_messages(task: dict) -> list[dict]:
-    """Render only the solver-visible problem and deliverable contract."""
-    task = validate_task(task)
-    problem = task["problem"]
-    requirements = "\n".join(
-        f"- {requirement}" for requirement in task["deliverable"]["requirements"]
-    )
-    user = f"""{problem["question"]}
-
-Scientific background:
-{problem["background"]}
-
-Deliverables:
-{requirements}
-
-Make the scientific method, assumptions, comparisons, and justification explicit
-in the response before presenting the final implementation or analysis.
-"""
+    """Render the complete, source-free task that all reviewers must evaluate."""
     return [
         {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": user},
+        {"role": "user", "content": render_student_user(task)},
     ]
 
 
@@ -164,6 +149,7 @@ def collect_trace(
             "factory_commit": factory_commit or current_commit(),
             "task_set_hash": task_set_hash,
             "source_commit": task["source"]["commit"],
+            "student_view_hash": student_view_hash(task),
             "run_variant": run_variant or "default",
         },
     }
