@@ -81,6 +81,20 @@ def _string_list(
     return value
 
 
+def _public_list(value: object, path: str, *, minimum: int = 2) -> list:
+    """Accept concise labels or structured public scientific givens."""
+    if not isinstance(value, list) or len(value) < minimum:
+        raise SchemaError(f"{path} must contain at least {minimum} items")
+    for index, item in enumerate(value):
+        if isinstance(item, str):
+            _string(item, f"{path}[{index}]")
+        elif isinstance(item, Mapping) and item:
+            canonical_hash(item)
+        else:
+            raise SchemaError(f"{path}[{index}] must be a nonempty string or object")
+    return value
+
+
 def validate_task(task: object) -> dict:
     """Validate and return a reasoning task without altering it."""
     task = _mapping(task, "task")
@@ -134,24 +148,24 @@ def validate_task(task: object) -> dict:
 
     payload = _mapping(task.get("archetype_payload"), "archetype_payload")
     if archetype == "derive_implement":
-        _string_list(
+        _public_list(
             payload.get("assumptions"), "archetype_payload.assumptions", minimum=2
         )
         _string(payload.get("derivation_target"), "archetype_payload.derivation_target")
     elif archetype == "diagnose_revise":
-        _string_list(
+        _public_list(
             payload.get("observations"), "archetype_payload.observations", minimum=2
         )
-        _string_list(
+        _public_list(
             payload.get("candidate_causes"),
             "archetype_payload.candidate_causes",
             minimum=2,
         )
     else:
-        _string_list(
+        _public_list(
             payload.get("alternatives"), "archetype_payload.alternatives", minimum=2
         )
-        _string_list(
+        _public_list(
             payload.get("decision_criteria"),
             "archetype_payload.decision_criteria",
             minimum=2,

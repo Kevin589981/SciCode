@@ -165,7 +165,13 @@ def verify_task(
         None,
     )
     if value is None:
-        raise VerificationError("verifier response has no complete result object")
+        choice = response["choices"][0]
+        raise VerificationError(
+            "verifier response has no complete result object "
+            f"(finish_reason={choice.get('finish_reason')}, "
+            f"content_chars={len(message.get('content') or '')}, "
+            f"reasoning_chars={len(message.get('reasoning_content') or '')})"
+        )
     scores = value["scores"]
     for name in SCORE_NAMES:
         score = scores.get(name)

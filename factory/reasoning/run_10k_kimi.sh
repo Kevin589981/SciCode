@@ -95,6 +95,13 @@ if [[ ! -s "${SCICODEPILE_CATALOG}" ]]; then
   exit 2
 fi
 
+if [[ "${SCICODE_ALLOW_OVERLAP:-0}" != "1" ]] && \
+  pgrep -f '[/]root/ScienceIDE-workspace/SciCode/data-reasoning-10k-v1' >/dev/null; then
+  echo "The v1 10k controller is still active; starting another 500-slot batch could exceed shared model capacity." >&2
+  echo "Wait for v1 to finish, or set SCICODE_ALLOW_OVERLAP=1 after arranging a safe global budget." >&2
+  exit 2
+fi
+
 # The controller polls METRICS_URL every 30 seconds. It estimates other users'
 # traffic as deployment_active - this_process_active, then admits between 500
 # and 1792 calls. In-process slots avoid a SQLite write per request. Run only

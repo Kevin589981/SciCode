@@ -41,11 +41,11 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --solver-model "${MODEL}" \
   --judge-model "${MODEL}" \
   --context-window-tokens 262144 \
-  --author-max-tokens 8192 \
+  --author-max-tokens 32768 \
   --solver-max-tokens 16384 \
   --critic-max-tokens 4096 \
-  --verifier-max-tokens 4096 \
-  --judge-max-tokens 8192 \
+  --verifier-max-tokens 16384 \
+  --judge-max-tokens 16384 \
   --judge-max-input-chars 100000 \
   --timeout 2400 \
   --pipeline-concurrency 1

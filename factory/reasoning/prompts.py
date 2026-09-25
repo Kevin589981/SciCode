@@ -67,6 +67,8 @@ givens, never the diagnosis, preferred alternative, derived result, or answer.
 You may add task-specific public fields (for example available_primitives or
 constraints) to problem, deliverable, or archetype_payload; they will all be
 shown verbatim to the solver. Never put a reference solution in these fields.
+Payload list entries may be strings or structured objects when the latter make
+scientific inputs clearer; either form is fully visible to the solver.
 In particular, derivation_target names what must be derived; do not write the
 resulting equation, argmin, algorithm steps, or correctness condition there.
 Do not hide essential numerical values in reasoning_contract.evidence_expected.

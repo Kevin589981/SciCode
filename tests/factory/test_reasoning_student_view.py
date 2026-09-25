@@ -2,6 +2,7 @@ import json
 import unittest
 
 from factory.reasoning.preflight import preflight_task
+from factory.reasoning.schema import validate_task
 from factory.reasoning.rollout import solver_messages
 from factory.reasoning.student_view import render_student_user, student_view_hash
 from factory.reasoning.verify import verify_task
@@ -9,6 +10,17 @@ from tests.factory_fixtures import task_for
 
 
 class StudentViewTests(unittest.TestCase):
+    def test_structured_scientific_alternatives_are_valid_and_visible(self):
+        task = task_for(archetype='compare_justify')
+        task['archetype_payload']['alternatives'] = [
+            {'method': 'spectral', 'regime': 'smooth'},
+            {'method': 'finite volume', 'regime': 'discontinuous'},
+        ]
+        validate_task(task)
+        prompt = render_student_user(task)
+        for phrase in ('spectral', 'smooth', 'finite volume', 'discontinuous'):
+            self.assertIn(phrase, prompt)
+
     def test_additional_public_fields_are_rendered_not_dropped(self):
         for path in ('problem', 'deliverable', 'archetype_payload'):
             with self.subTest(path=path):
