@@ -778,6 +778,20 @@ def main() -> None:
     args = parser.parse_args()
     if hasattr(args, "min_tasks_per_repo") and args.min_tasks_per_repo < 3:
         parser.error("--min-tasks-per-repo must be at least 3 for archetype coverage")
+    if hasattr(args, "tasks_per_repo") and args.tasks_per_repo < args.min_tasks_per_repo:
+        parser.error("--tasks-per-repo must be >= --min-tasks-per-repo")
+    if hasattr(args, "context_window_tokens"):
+        output_budgets = (
+            args.author_max_tokens or args.max_tokens,
+            args.solver_max_tokens or args.max_tokens,
+            args.critic_max_tokens,
+            args.verifier_max_tokens,
+            args.judge_max_tokens,
+        )
+        if any(value < 1 or value >= args.context_window_tokens for value in output_budgets):
+            parser.error("every output budget must fit inside --context-window-tokens")
+        if (args.judge_max_input_chars + 3) // 4 + args.judge_max_tokens > args.context_window_tokens:
+            parser.error("judge input/output budgets exceed --context-window-tokens")
     if hasattr(args, "reservation_rows_per_repo"):
         reservation = args.reservation_rows_per_repo
         if reservation is not None and (

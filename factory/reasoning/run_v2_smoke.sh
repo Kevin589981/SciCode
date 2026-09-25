@@ -23,7 +23,7 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --cache-root "${DATA_ROOT}/.cache/reasoning-repositories" \
   --db "${OUTPUT_ROOT}/batch.sqlite3" \
   --repository-source scicodepile \
-  --scicodepile-catalog "${DATA_ROOT}/.cache/scicodepile/catalog.jsonl" \
+  --scicodepile-catalog "${SCICODEPILE_CATALOG:-${DATA_ROOT}/.cache/scicodepile/catalog.jsonl}" \
   --repository-limit 3 \
   --target-sft-rows 2 \
   --workers 3 \
@@ -40,7 +40,7 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --verifier-model "${MODEL}" \
   --solver-model "${MODEL}" \
   --judge-model "${MODEL}" \
-  --context-window-tokens 32768 \
+  --context-window-tokens 262144 \
   --author-max-tokens 8192 \
   --solver-max-tokens 16384 \
   --critic-max-tokens 4096 \
