@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode-v2}"
+REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode-v3}"
 DATA_ROOT="${SCICODE_DATA_ROOT:-/root/ScienceIDE-workspace/SciCode}"
-OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-v2-smoke-final}"
+OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-v3-smoke}"
 PYTHON_BIN="${SCICODE_FACTORY_PYTHON:-/root/scicode-factory-venv/bin/python}"
 MODEL="${SCICODE_LLM_MODEL:-Kimi-K3}"
 
@@ -13,7 +13,7 @@ export SCICODE_LLM_MODEL="${MODEL}"
 export NO_PROXY="${NO_PROXY:-127.0.0.1,localhost,10.100.184.127}"
 
 if [[ "${1:-}" != "--execute" ]]; then
-  echo "Dry run. Run bash factory/reasoning/run_v2_smoke.sh --execute to create ${OUTPUT_ROOT}."
+  echo "Dry run. Run bash factory/reasoning/run_v3_smoke.sh --execute to create ${OUTPUT_ROOT}."
   exit 0
 fi
 

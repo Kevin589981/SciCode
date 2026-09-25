@@ -96,14 +96,10 @@ def validate_task(task: object) -> dict:
         _string(source.get(name), f"source.{name}")
 
     problem = _mapping(task.get("problem"), "problem")
-    if set(problem) != {"question", "background"}:
-        raise SchemaError("problem must contain only question and background")
     _string(problem.get("question"), "problem.question", min_chars=120)
     _string(problem.get("background"), "problem.background", min_chars=60)
 
     deliverable = _mapping(task.get("deliverable"), "deliverable")
-    if set(deliverable) != {"kind", "requirements"}:
-        raise SchemaError("deliverable must contain only kind and requirements")
     if deliverable.get("kind") not in {
         "analysis",
         "analysis_and_code",
@@ -137,16 +133,6 @@ def validate_task(task: object) -> dict:
     )
 
     payload = _mapping(task.get("archetype_payload"), "archetype_payload")
-    expected_payload_keys = {
-        "derive_implement": {"assumptions", "derivation_target"},
-        "diagnose_revise": {"observations", "candidate_causes"},
-        "compare_justify": {"alternatives", "decision_criteria"},
-    }[archetype]
-    if set(payload) != expected_payload_keys:
-        raise SchemaError(
-            "archetype_payload keys must be exactly "
-            + ", ".join(sorted(expected_payload_keys))
-        )
     if archetype == "derive_implement":
         _string_list(
             payload.get("assumptions"), "archetype_payload.assumptions", minimum=2

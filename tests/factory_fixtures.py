@@ -76,7 +76,9 @@ def task_for(archetype="derive_implement"):
 
 def trace_for(task=None, *, outcome="fail"):
     task = task or task_for()
-    from factory.reasoning.student_view import render_student_user, student_view_hash
+    from factory.reasoning.student_view import (
+        STUDENT_VIEW_POLICY, render_student_user, student_view_hash,
+    )
     return {
         "schema_version": TRACE_SCHEMA,
         "trace_id": f"{task['task_id']}::fake-solver::0",
@@ -101,6 +103,7 @@ def trace_for(task=None, *, outcome="fail"):
             "factory_commit": "abc123",
             "task_set_hash": "def456",
             "student_view_hash": student_view_hash(task),
+            "student_view_policy": STUDENT_VIEW_POLICY,
         },
     }
 

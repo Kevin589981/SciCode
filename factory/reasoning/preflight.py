@@ -20,7 +20,7 @@ from .schema import SchemaError, canonical_hash, validate_task
 from .student_view import render_student_user, student_view_hash
 
 PREFLIGHT_SCHEMA = "scicode-reasoning-preflight-v1"
-PREFLIGHT_POLICY = "reasoning-depth-v3"
+PREFLIGHT_POLICY = "reasoning-depth-v4"
 CRITIC_SCORE_NAMES = (
     "scientific_depth",
     "multi_step_dependency",
@@ -113,6 +113,9 @@ Judge whether solving the task requires dependent scientific reasoning rather
 than docstring translation, mechanical branching, source recall, or verbose but
 empty explanation. Do not solve the task. Judge only the exact student-visible
 prompt below. Private source or rubric cannot repair missing inputs.
+Inspect every section, including derivation targets and optional public fields.
+If the prompt itself supplies the requested equation, algorithm, diagnosis, or
+preferred alternative, set answer_exposed=true even if the prose is long.
 
 STUDENT-VISIBLE PROMPT:
 {render_student_user(task)}

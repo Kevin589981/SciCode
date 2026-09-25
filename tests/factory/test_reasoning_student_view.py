@@ -2,7 +2,6 @@ import json
 import unittest
 
 from factory.reasoning.preflight import preflight_task
-from factory.reasoning.schema import SchemaError, validate_task
 from factory.reasoning.rollout import solver_messages
 from factory.reasoning.student_view import render_student_user, student_view_hash
 from factory.reasoning.verify import verify_task
@@ -10,13 +9,17 @@ from tests.factory_fixtures import task_for
 
 
 class StudentViewTests(unittest.TestCase):
-    def test_unrendered_public_fields_are_rejected(self):
+    def test_additional_public_fields_are_rendered_not_dropped(self):
         for path in ('problem', 'deliverable', 'archetype_payload'):
             with self.subTest(path=path):
                 task = task_for()
-                task[path]['extra_hidden_input'] = 'essential numerical value 42'
-                with self.assertRaises(SchemaError):
-                    validate_task(task)
+                task[path]['extra_input'] = {
+                    'primitive': 'rotate_dihedral', 'numerical_value': 42,
+                }
+                prompt = render_student_user(task)
+                self.assertIn('extra_input', prompt)
+                self.assertIn('rotate_dihedral', prompt)
+                self.assertIn('42', prompt)
 
     def test_all_public_fields_visible_and_private_fields_hidden(self):
         for archetype in ('derive_implement', 'diagnose_revise', 'compare_justify'):

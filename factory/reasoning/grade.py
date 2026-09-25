@@ -17,14 +17,14 @@ from .schema import (
     validate_task,
     validate_trace,
 )
-from .student_view import render_student_user, student_view_hash
+from .student_view import STUDENT_VIEW_POLICY, render_student_user, student_view_hash
 
 
 class GradeError(ValueError):
     """A trace cannot be graded or a judge response is invalid."""
 
 
-GRADE_POLICY_VERSION = "reasoning-value-v3"
+GRADE_POLICY_VERSION = "reasoning-value-v4"
 
 
 def grade_id_for(trace: dict, model: str) -> str:
@@ -176,7 +176,8 @@ def judge_trace(
     if trace["task_id"] != task["task_id"] or trace["task_hash"] != canonical_hash(task):
         raise GradeError("trace does not match task content")
     provenance = trace.get("provenance") or {}
-    if provenance.get("student_view_hash") != student_view_hash(task):
+    if (provenance.get("student_view_hash") != student_view_hash(task)
+        or provenance.get("student_view_policy") != STUDENT_VIEW_POLICY):
         raise GradeError("trace was not generated under the current student-visible prompt")
     if not any(
         message.get('role') == 'user' and message.get('content') == render_student_user(task)

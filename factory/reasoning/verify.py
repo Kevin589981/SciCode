@@ -14,7 +14,7 @@ from .schema import SchemaError, canonical_hash, validate_task
 from .student_view import render_student_user, student_view_hash
 
 VERIFICATION_SCHEMA = "scicode-task-verification-v1"
-VERIFICATION_POLICY = "source-grounding-v2"
+VERIFICATION_POLICY = "source-grounding-v3"
 SCORE_NAMES = (
     "scientific_validity",
     "source_grounding",
@@ -85,6 +85,8 @@ Check whether the authored problem is scientifically defensible, answerable from
 its stated background plus standard scientific knowledge, internally
 consistent, grounded in the private source, and resistant to a shallow shortcut.
 The source is verification evidence and is not shown to the eventual solver.
+If a derivation target or any other public field states the requested rule,
+diagnosis, or method choice, set answer_exposed=true regardless of source quality.
 
 For every evidence item, copy an exact nontrivial quote from `source.source`.
 Do not invent line numbers or paraphrase the quote. A deterministic checker will

@@ -11,7 +11,7 @@ from pathlib import Path
 from .grade import GRADE_POLICY_VERSION, GradeError, current_grades
 from .preflight import PREFLIGHT_POLICY
 from .schema import canonical_hash, validate_grade, validate_task, validate_trace
-from .student_view import render_student_user, student_view_hash
+from .student_view import STUDENT_VIEW_POLICY, render_student_user, student_view_hash
 from .verify import VERIFICATION_POLICY
 
 SFT_SCHEMA = "scicode-reasoning-sft-v1"
@@ -151,6 +151,7 @@ def _sft_row(
         "trace_id": trace["trace_id"],
         "task_hash": trace["task_hash"],
         "archetype": task["archetype"],
+        "student_view_policy": STUDENT_VIEW_POLICY,
         "messages": _sft_messages(trace, grade, inline_thinking),
         "tools": [],
         "thinking_format": (
@@ -247,7 +248,8 @@ def export_sft(
             counts["ungraded"] += 1
             continue
         validate_grade(grade, trace)
-        if (trace.get('provenance') or {}).get('student_view_hash') != student_view_hash(task):
+        if ((trace.get('provenance') or {}).get('student_view_hash') != student_view_hash(task)
+            or (trace.get('provenance') or {}).get('student_view_policy') != STUDENT_VIEW_POLICY):
             raise ExportError(f"trace {trace['trace_id']} has a stale student view")
         if not any(
             message.get('role') == 'user' and message.get('content') == render_student_user(task)

@@ -64,6 +64,11 @@ requirements, and EVERY archetype_payload field, but will NOT see the source
 or reasoning_contract. All necessary observations, assumptions, alternatives,
 and criteria must be in those visible fields. Payload fields must state neutral
 givens, never the diagnosis, preferred alternative, derived result, or answer.
+You may add task-specific public fields (for example available_primitives or
+constraints) to problem, deliverable, or archetype_payload; they will all be
+shown verbatim to the solver. Never put a reference solution in these fields.
+In particular, derivation_target names what must be derived; do not write the
+resulting equation, argmin, algorithm steps, or correctness condition there.
 Do not hide essential numerical values in reasoning_contract.evidence_expected.
 
 Task archetype: {archetype}

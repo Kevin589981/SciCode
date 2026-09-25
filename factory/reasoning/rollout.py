@@ -15,7 +15,7 @@ from pathlib import Path
 from ..author import llm
 from .preflight import PREFLIGHT_POLICY
 from .schema import TRACE_SCHEMA, canonical_hash, validate_task, validate_trace
-from .student_view import render_student_user, student_view_hash
+from .student_view import STUDENT_VIEW_POLICY, render_student_user, student_view_hash
 from .verify import VERIFICATION_POLICY
 
 
@@ -150,6 +150,7 @@ def collect_trace(
             "task_set_hash": task_set_hash,
             "source_commit": task["source"]["commit"],
             "student_view_hash": student_view_hash(task),
+            "student_view_policy": STUDENT_VIEW_POLICY,
             "run_variant": run_variant or "default",
         },
     }

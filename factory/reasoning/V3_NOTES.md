@@ -1,6 +1,8 @@
-# Reasoning factory v2
+# Reasoning factory v3
 
-This branch is an isolated successor to `scienceide-pipeline`. The production
+This branch is an isolated successor to `scienceide-pipeline`. A diagnostic v2
+smoke exposed useful extra public payload fields, which v3 renders explicitly.
+The production
 controller in the original SciCode worktree is not hot-patched. Its queue and
 artifacts remain separate from every v2 output directory.
 
@@ -8,10 +10,10 @@ artifacts remain separate from every v2 output directory.
 
 `student_view.py` is the canonical renderer. The solver sees `problem`,
 `deliverable`, and all archetype-specific payload givens. The source and private
-reasoning rubric stay private. The critic and verifier inspect this exact view;
+reasoning rubric stay private. Any extra keys in these public sections are
+rendered rather than silently dropped. The critic and verifier inspect this exact view;
 the judge sees the same view plus the recorded trace. A missing input or an
-answer already exposed in the prompt blocks admission. The public schema rejects
-extra, unrendered keys. Trace IDs, review policies, provenance, and export checks
+answer already exposed in the prompt blocks admission. Trace IDs, review policies, provenance, and export checks
 prevent a legacy or mismatched prompt from being silently reused.
 
 This is a semantic quality gate, not a proof of scientific validity: one Kimi
@@ -33,9 +35,9 @@ SQLite queue on unsupported WAL/shared-memory filesystems.
 
 ## Operations
 
-The full launcher defaults to `SciCode-v2/data-reasoning-10k-v2` and reads the
+The full launcher defaults to `SciCode-v3/data-reasoning-10k-v3` and reads the
 already-prepared SciCodePile catalog/snapshots from the original data root.
-The bounded launcher is `run_v2_smoke.sh`; both require `--execute`. Override
+The bounded launcher is `run_v3_smoke.sh`; both require `--execute`. Override
 `SCICODE_OUTPUT_ROOT` for a fresh output and `SCICODEPILE_CATALOG` for a curated
 catalog. Do not change the worktree commit while a batch is running: each job
 recipe pins `factory_commit` and rejects version drift.
