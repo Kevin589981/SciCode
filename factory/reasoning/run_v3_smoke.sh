@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode-v3}"
+SCRIPT_REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="${SCICODE_REPO_ROOT:-${SCRIPT_REPO_ROOT}}"
 DATA_ROOT="${SCICODE_DATA_ROOT:-/root/ScienceIDE-workspace/SciCode}"
 OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-v3-smoke}"
 PYTHON_BIN="${SCICODE_FACTORY_PYTHON:-/root/scicode-factory-venv/bin/python}"

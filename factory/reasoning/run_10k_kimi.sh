@@ -24,7 +24,8 @@ EOF
   exit 0
 fi
 
-REPO_ROOT="${SCICODE_REPO_ROOT:-/root/ScienceIDE-workspace/SciCode-v3}"
+SCRIPT_REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="${SCICODE_REPO_ROOT:-${SCRIPT_REPO_ROOT}}"
 DATA_ROOT="${SCICODE_DATA_ROOT:-/root/ScienceIDE-workspace/SciCode}"
 OUTPUT_ROOT="${SCICODE_OUTPUT_ROOT:-${REPO_ROOT}/data-reasoning-10k-v3}"
 CACHE_ROOT="${SCICODE_CACHE_ROOT:-${DATA_ROOT}/.cache/reasoning-repositories}"
