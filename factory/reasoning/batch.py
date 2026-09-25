@@ -776,6 +776,8 @@ def main() -> None:
     _recipe_options(auto_parser)
 
     args = parser.parse_args()
+    if hasattr(args, "min_tasks_per_repo") and args.min_tasks_per_repo < 3:
+        parser.error("--min-tasks-per-repo must be at least 3 for archetype coverage")
     if hasattr(args, "reservation_rows_per_repo"):
         reservation = args.reservation_rows_per_repo
         if reservation is not None and (

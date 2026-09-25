@@ -31,7 +31,7 @@ exec "${PYTHON_BIN}" -m factory.reasoning.batch auto \
   --llm-slots 3 \
   --job-lease-seconds 14400 \
   --tasks-per-repo 3 \
-  --min-tasks-per-repo 1 \
+  --min-tasks-per-repo 3 \
   --reservation-rows-per-repo 1 \
   --max-mined-candidates 100 \
   --profile-model "${MODEL}" \
