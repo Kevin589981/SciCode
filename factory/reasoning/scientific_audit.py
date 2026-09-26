@@ -22,6 +22,7 @@ from .author import _json_objects
 from .batch import controller_lock
 
 POLICY = "scientific-answer-audit-v2"
+SELECTION_POLICY = "scientific-audit-selection-v2"
 
 
 class AuditError(ValueError):
@@ -413,29 +414,40 @@ def materialize(input_path: Path, audit_path: Path, output_dir: Path) -> dict:
                     if disposition == "model_supported_answer":
                         if not content_loss:
                             raise AuditError(f"answer approval contradicts loss flag: {identity}")
-                        sink = answers
-                    elif disposition == "reasoning_candidate" and assistant.get("reasoning_loss") is True:
-                        row = copy.deepcopy(row)
-                        assistant = row["messages"][-1]
-                        suppressed_answer_sha = hashlib.sha256(
-                            assistant["content"].encode("utf-8")
-                        ).hexdigest()
-                        assistant["content"] = ""
-                        assistant["content_loss"] = False
-                        assistant["loss"] = True
-                        sink = reasoning
-                    else:
-                        sink = None
-                        disposition = "quarantine"
-                    if sink is not None:
-                        row["scientific_audit"] = {
+                        answer_row = copy.deepcopy(row)
+                        answer_assistant = answer_row["messages"][-1]
+                        answer_assistant["reasoning_loss"] = False
+                        answer_assistant["loss"] = True
+                        answer_row["scientific_audit"] = {
                             "policy": POLICY, "model": audit["model"],
+                            "selection_policy": SELECTION_POLICY,
                             "row_sha256": digest, "disposition": disposition,
+                            "supervision_target": "answer",
                             "scientific_correctness_proven": False,
                         }
-                        if disposition == "reasoning_candidate":
-                            row["scientific_audit"]["suppressed_answer_sha256"] = suppressed_answer_sha
-                        sink.write((json.dumps(row, ensure_ascii=False) + "\n").encode())
+                        answers.write((json.dumps(answer_row, ensure_ascii=False) + "\n").encode())
+                        counts["answer_output_rows"] += 1
+                    if disposition != "quarantine" and assistant.get("reasoning_loss") is True:
+                        reasoning_row = copy.deepcopy(row)
+                        reasoning_assistant = reasoning_row["messages"][-1]
+                        suppressed_answer_sha = hashlib.sha256(
+                            reasoning_assistant["content"].encode("utf-8")
+                        ).hexdigest()
+                        reasoning_assistant["content"] = ""
+                        reasoning_assistant["content_loss"] = False
+                        reasoning_assistant["loss"] = True
+                        reasoning_row["scientific_audit"] = {
+                            "policy": POLICY, "model": audit["model"],
+                            "selection_policy": SELECTION_POLICY,
+                            "row_sha256": digest, "disposition": disposition,
+                            "supervision_target": "reasoning_candidate",
+                            "scientific_correctness_proven": False,
+                            "suppressed_answer_sha256": suppressed_answer_sha,
+                        }
+                        reasoning.write((json.dumps(reasoning_row, ensure_ascii=False) + "\n").encode())
+                        counts["reasoning_output_rows"] += 1
+                    elif disposition == "reasoning_candidate":
+                        disposition = "quarantine"
                     decisions.write((json.dumps({
                         "trace_id": identity, "row_sha256": digest,
                         "disposition": disposition,
@@ -444,7 +456,8 @@ def materialize(input_path: Path, audit_path: Path, output_dir: Path) -> dict:
                     counts[disposition] += 1
             if set(audits) != seen:
                 raise AuditError("audit contains rows absent from the input")
-            report = {"policy": POLICY, "scientific_correctness_proven": False,
+            report = {"policy": POLICY, "selection_policy": SELECTION_POLICY,
+                      "scientific_correctness_proven": False,
                       "input": str(input_path.resolve()), "audit": str(audit_path.resolve()),
                       "counts": dict(counts)}
             temporary["scientific-audit-report.json"] = Path(str(targets["scientific-audit-report.json"]) + ".tmp")
