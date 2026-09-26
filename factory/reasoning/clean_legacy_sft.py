@@ -12,7 +12,6 @@ import concurrent.futures as futures
 import copy
 import hashlib
 import json
-import os
 import sqlite3
 import sys
 import threading
@@ -24,7 +23,8 @@ from .author import _json_objects
 from .schema import canonical_hash, validate_task
 
 POLICY = "legacy-scientific-sft-clean-v1"
-REVIEW_POLICY = "adversarial-scientific-answer-review-v1"
+REVIEW_POLICY = "adversarial-scientific-answer-review-v2"
+REVIEW_FILE = f"semantic-reviews-{REVIEW_POLICY}.jsonl"
 
 
 class CleaningError(RuntimeError):
@@ -215,15 +215,19 @@ def _review_prompt(row: dict, record: dict) -> str:
     messages = row["messages"]
     answer = messages[2].get("content") or ""
     reasoning = messages[2].get("reasoning_content") or ""
-    if answer:
-        thinking_excerpt = reasoning[:6000] + "\n[... middle omitted ...]\n" + reasoning[-6000:]
+    limit = 6000 if answer else 90000
+    if len(reasoning) <= limit * 2:
+        thinking_excerpt = reasoning
+        excerpt_omits_middle = False
     else:
-        thinking_excerpt = reasoning[:90000] + "\n[... middle omitted ...]\n" + reasoning[-90000:]
+        thinking_excerpt = reasoning[:limit] + "\n[... middle omitted FROM REVIEW only ...]\n" + reasoning[-limit:]
+        excerpt_omits_middle = True
     view = {
         "student_prompt": messages[1]["content"],
         "private_structured_author_fields_for_missing_input_check_only": record["task_aux"],
         "answer": answer,
         "reasoning_excerpt": thinking_excerpt,
+        "reasoning_excerpt_omits_middle": excerpt_omits_middle,
         "finish_reason": row["termination"]["finish_reason"],
     }
     return f"""You are an ADVERSARIAL scientific SFT auditor. Recheck this sample independently.
@@ -234,10 +238,23 @@ were not shown to the student. A truncated but useful reasoning trajectory may
 still train reasoning; an incorrect or unfinished final answer must not train
 content. Do not reject merely because a trace is long or unfinished.
 
-Inspect at least one quantitative, logical, or edge-case claim yourself. Do not
-pretend to run code. Quote the relevant question/answer text for any major flaw.
-Be skeptical but do not invent objections. If a decisive claim cannot be
-checked, say uncertain rather than fabricating proof.
+First extract EVERY hard requirement from the student prompt and ask whether the
+answer meets it over its stated domain. In particular, an exact universal
+requirement is violated by ONE legitimate counterexample; a caveat that admits
+the violation does NOT make the requirement satisfied. If two hard requirements
+are mutually inconsistent, task_status is flawed, even if the answer discusses
+that inconsistency. If a solution chooses a convention that weakens an explicit
+requirement, answer_status is exclude. Do not silently add new assumptions.
+
+Then construct at least ONE NEW adversarial quantitative, logical, or edge-case
+test that is not copied from the proposed answer's own examples. Checking only
+the answer's examples is insufficient. Check units, limits, degeneracy, and
+whether code implements the stated mathematics. Do not pretend to run code.
+Quote question/answer text or provide concrete input and expected versus actual
+outputs for any major flaw. Be skeptical but do not invent objections. If a
+decisive claim cannot be checked, say uncertain rather than fabricating proof.
+The reasoning excerpt may omit its middle FOR REVIEW EFFICIENCY; this does not
+mean the original trace was interrupted. Use finish_reason for termination.
 
 SAMPLE:
 {json.dumps(view, ensure_ascii=False)}
@@ -246,6 +263,8 @@ Return ONLY one complete JSON object with:
 {{"task_status":"sound|flawed|uncertain",
   "reasoning_status":"train|exclude|uncertain",
   "answer_status":"train|exclude|uncertain",
+  "requirement_checks":[{{"requirement":"quoted hard requirement", "status":"met|violated|uncertain", "evidence":"specific check"}}],
+  "novel_counterexample":"new test input and expected versus actual result, or why no counterexample survives",
   "checks":["at least one specific independently checked claim"],
   "issues":[{{"severity":"major|minor", "evidence":"exact short quote or explicit counterexample", "explanation":"why it matters"}}],
   "summary":"brief rationale"}}
@@ -273,6 +292,10 @@ def _parse_review(response: dict, *, answer: str) -> dict:
         raise CleaningError("reviewer returned no complete verdict object")
     if not isinstance(value.get("checks"), list) or not value["checks"]:
         raise CleaningError("reviewer omitted independent checks")
+    if not isinstance(value.get("requirement_checks"), list) or not value["requirement_checks"]:
+        raise CleaningError("reviewer omitted requirement audit")
+    if not isinstance(value.get("novel_counterexample"), str) or not value["novel_counterexample"].strip():
+        raise CleaningError("reviewer omitted adversarial test")
     if not isinstance(value.get("issues"), list) or not isinstance(value.get("summary"), str):
         raise CleaningError("reviewer issues or summary is invalid")
     if not answer and value["answer_status"] != "exclude":
@@ -319,7 +342,7 @@ def review(output: Path, *, model: str, workers: int, max_tokens: int, timeout: 
            limit: int | None = None, trace_id: str | None = None) -> dict:
     raw_path = output / "original-copy.jsonl"
     index_path = output / "index.jsonl"
-    review_path = output / "semantic-reviews.jsonl"
+    review_path = output / REVIEW_FILE
     if not raw_path.is_file() or not index_path.is_file():
         raise CleaningError("run prepare first")
     existing = {}
@@ -428,14 +451,14 @@ def _decide(row: dict, record: dict, model_review: dict | None) -> tuple[dict | 
 
 
 def finalize(output: Path) -> dict:
-    for name in ("original-copy.jsonl", "index.jsonl", "semantic-reviews.jsonl"):
+    for name in ("original-copy.jsonl", "index.jsonl", REVIEW_FILE):
         if not (output / name).is_file():
             raise CleaningError(f"missing required file: {name}")
     targets = [output / name for name in ("cleaned.jsonl", "decisions.jsonl", "rejected.jsonl", "cleaning-report.json")]
     if any(path.exists() or path.with_suffix(".tmp").exists() for path in targets):
         raise CleaningError("refusing to overwrite existing final output")
     reviews = {}
-    for _, _, item in _read_jsonl(output / "semantic-reviews.jsonl"):
+    for _, _, item in _read_jsonl(output / REVIEW_FILE):
         reviews[item["trace_id"]] = item
     counts = Counter()
     sha = hashlib.sha256()

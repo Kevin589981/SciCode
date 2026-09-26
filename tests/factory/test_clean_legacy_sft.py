@@ -5,10 +5,12 @@ import unittest
 from pathlib import Path
 
 from factory.reasoning.clean_legacy_sft import (
+    REVIEW_FILE,
     REVIEW_POLICY,
     _decide,
     _parse_review,
     _precheck,
+    _review_prompt,
     finalize,
     prepare,
 )
@@ -92,9 +94,19 @@ class LegacySftCleaningTests(unittest.TestCase):
     def test_review_requires_complete_verdict(self):
         response = {"choices": [{"message": {"content": json.dumps({
             "task_status": "sound", "reasoning_status": "train", "answer_status": "exclude",
+            "requirement_checks": [{"requirement": "a", "status": "met", "evidence": "b"}],
+            "novel_counterexample": "new edge case checked",
             "checks": ["checked degenerate case"], "issues": [], "summary": "valid",
         })}}]}
         self.assertEqual(_parse_review(response, answer="")["answer_status"], "exclude")
+
+    def test_review_prompt_demands_new_counterexample_and_hard_requirements(self):
+        task = task_for()
+        row = old_row(task, answer="a possible answer", interrupted=False)
+        prompt = _review_prompt(row, {"task_aux": {"archetype_payload": {}, "reasoning_contract": {}}})
+        self.assertIn("EVERY hard requirement", prompt)
+        self.assertIn("ONE NEW adversarial", prompt)
+        self.assertIn('"finish_reason": "stop"', prompt)
 
     def test_prepare_and_finalize_preserve_original_copy(self):
         with tempfile.TemporaryDirectory() as td:
@@ -128,7 +140,7 @@ class LegacySftCleaningTests(unittest.TestCase):
                 "verdict": {"task_status": "sound", "reasoning_status": "train",
                             "answer_status": "exclude"},
             }
-            (output / "semantic-reviews.jsonl").write_text(json.dumps(review) + "\n", encoding="utf-8")
+            (output / REVIEW_FILE).write_text(json.dumps(review) + "\n", encoding="utf-8")
             report = finalize(output)
             self.assertEqual(report["counts"]["keep"], 1)
             cleaned = json.loads((output / "cleaned.jsonl").read_text(encoding="utf-8"))
