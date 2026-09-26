@@ -83,6 +83,8 @@ python -m factory.reasoning.scientific_audit select \
 `model-supported-answer.jsonl` contains answers that the audit found to meet
 every extracted requirement; `reasoning-candidates.jsonl` retains useful
 thinking with `content_loss=false` where the answer is unverified or excluded.
+It blanks the unapproved final `content` so a trainer that ignores loss flags
+cannot accidentally learn it; the original source retains the full answer.
 Quarantined rows remain in the original JSONL and decision log. Both outputs
 are *candidate* data, never a scientific correctness certificate. Before
 training, inspect false-positive rates on a fixed adversarial/verified set;

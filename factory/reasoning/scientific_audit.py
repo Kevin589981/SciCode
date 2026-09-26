@@ -417,6 +417,10 @@ def materialize(input_path: Path, audit_path: Path, output_dir: Path) -> dict:
                     elif disposition == "reasoning_candidate" and assistant.get("reasoning_loss") is True:
                         row = copy.deepcopy(row)
                         assistant = row["messages"][-1]
+                        suppressed_answer_sha = hashlib.sha256(
+                            assistant["content"].encode("utf-8")
+                        ).hexdigest()
+                        assistant["content"] = ""
                         assistant["content_loss"] = False
                         assistant["loss"] = True
                         sink = reasoning
@@ -429,6 +433,8 @@ def materialize(input_path: Path, audit_path: Path, output_dir: Path) -> dict:
                             "row_sha256": digest, "disposition": disposition,
                             "scientific_correctness_proven": False,
                         }
+                        if disposition == "reasoning_candidate":
+                            row["scientific_audit"]["suppressed_answer_sha256"] = suppressed_answer_sha
                         sink.write((json.dumps(row, ensure_ascii=False) + "\n").encode())
                     decisions.write((json.dumps({
                         "trace_id": identity, "row_sha256": digest,

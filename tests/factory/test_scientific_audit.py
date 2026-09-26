@@ -175,6 +175,9 @@ class ScientificAuditTests(unittest.TestCase):
                                   .read_text(encoding="utf-8"))
             self.assertTrue(selected["messages"][-1]["reasoning_loss"])
             self.assertFalse(selected["messages"][-1]["content_loss"])
+            self.assertEqual(selected["messages"][-1]["content"], "")
+            self.assertTrue(selected["messages"][-1]["reasoning_content"])
+            self.assertTrue(selected["scientific_audit"]["suppressed_answer_sha256"])
             self.assertFalse(selected["scientific_audit"]["scientific_correctness_proven"])
             self.assertEqual(selected["scientific_audit"]["policy"], POLICY)
 
