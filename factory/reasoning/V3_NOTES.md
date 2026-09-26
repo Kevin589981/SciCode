@@ -45,3 +45,42 @@ recipe pins `factory_commit` and rejects version drift.
 Run `python -m pytest tests/factory -q` before deployment. Do not interpret a
 successful unit test as proof that Kimi has produced an accepted SFT sample;
 inspect `batch.sqlite3`, per-repository reports, and `accepted-sft.jsonl`.
+
+## Post-export scientific answer audit
+
+`scientific_audit.py` is an optional post-export stage for both the stopped v1
+candidate corpus and future SFT JSONL. One Kimi model is called twice per row:
+first with the *question only* to enumerate atomic requirements and design
+independent boundary probes, then with the question, frozen probes, and final
+answer to test each requirement. The long thinking text and old judge scores
+are deliberately absent from both calls. This avoids having a persuasive but
+incorrect explanation bias the answer check; it does **not** make a same-model
+review independent ground truth.
+
+Run a bounded smoke first (the source JSONL is read-only):
+
+```bash
+python -m factory.reasoning.scientific_audit review \
+  --input data-reasoning-10k-v1-cleaned-v1/candidate-cleaned.jsonl \
+  --out data-reasoning-10k-v1-cleaned-v1/scientific-audit-v1.jsonl \
+  --model Kimi-K3 --workers 4 --limit 10
+```
+
+The audit file is append-only, hash-bound to source rows, and resumable. Run
+without `--limit` to cover the complete corpus. Only then run `select` into a
+**new** directory; incomplete or changed audit records fail closed:
+
+```bash
+python -m factory.reasoning.scientific_audit select \
+  --input data-reasoning-10k-v1-cleaned-v1/candidate-cleaned.jsonl \
+  --audit data-reasoning-10k-v1-cleaned-v1/scientific-audit-v1.jsonl \
+  --out-dir data-reasoning-10k-v1-cleaned-v1/scientific-audit-selected-v1
+```
+
+`model-supported-answer.jsonl` contains answers that the audit found to meet
+every extracted requirement; `reasoning-candidates.jsonl` retains useful
+thinking with `content_loss=false` where the answer is unverified or excluded.
+Quarantined rows remain in the original JSONL and decision log. Both outputs
+are *candidate* data, never a scientific correctness certificate. Before
+training, inspect false-positive rates on a fixed adversarial/verified set;
+the known small-box IoF counterexample is a minimum regression test.
