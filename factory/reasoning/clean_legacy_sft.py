@@ -416,7 +416,8 @@ def _review_unlocked(output: Path, *, model: str, workers: int, max_tokens: int,
     return dict(counts)
 
 
-def _decide(row: dict, record: dict, model_review: dict | None) -> tuple[dict | None, dict]:
+def _decide(row: dict, record: dict, model_review: dict | None,
+            override: dict | None = None) -> tuple[dict | None, dict]:
     reasons = list(record["precheck_reasons"])
     repairs = list(record["repairs"])
     if model_review is None:
@@ -449,6 +450,19 @@ def _decide(row: dict, record: dict, model_review: dict | None) -> tuple[dict | 
         assistant["loss"] = assistant["reasoning_loss"] or assistant["content_loss"]
         if not assistant["loss"]:
             reasons.append("no_trainable_target_after_review")
+    if override is not None:
+        action = override["action"]
+        if action == "reject":
+            reasons.append("audited_override:" + override["reason_code"])
+        elif not reasons:
+            assistant = cleaned["messages"][2]
+            if action == "reasoning_only":
+                assistant["content_loss"] = False
+            elif action == "answer_only":
+                assistant["reasoning_loss"] = False
+            assistant["loss"] = assistant["reasoning_loss"] or assistant["content_loss"]
+            if not assistant["loss"]:
+                reasons.append("override_removed_last_training_target")
     decision = {
         "policy": POLICY,
         "trace_id": record["trace_id"],
@@ -459,6 +473,7 @@ def _decide(row: dict, record: dict, model_review: dict | None) -> tuple[dict | 
         "reasons": reasons,
         "repairs": repairs,
         "review": model_review,
+        "audited_override": override,
     }
     return (None if reasons else cleaned), decision
 
@@ -466,6 +481,118 @@ def _decide(row: dict, record: dict, model_review: dict | None) -> tuple[dict | 
 def finalize(output: Path) -> dict:
     with controller_lock(output / REVIEW_FILE, exclusive=True):
         return _finalize_unlocked(output)
+
+
+def _load_overrides(output: Path) -> dict[str, dict]:
+    overrides = {}
+    override_path = output / "audited-overrides.jsonl"
+    if override_path.exists():
+        for _, _, item in _read_jsonl(override_path):
+            if (
+                item.get("action") not in {"reject", "reasoning_only", "answer_only"}
+                or not isinstance(item.get("reason_code"), str)
+                or not item["reason_code"]
+                or not isinstance(item.get("explanation"), str)
+                or not item["explanation"]
+            ):
+                raise CleaningError("invalid audited override")
+            if item.get("trace_id") in overrides:
+                raise CleaningError("duplicate audited override")
+            overrides[item["trace_id"]] = item
+    return overrides
+
+
+def finalize_candidate(output: Path) -> dict:
+    """Deliver a deterministic candidate while exhaustive semantic review runs."""
+    with controller_lock(output / REVIEW_FILE, exclusive=True):
+        return _finalize_candidate_unlocked(output)
+
+
+def _finalize_candidate_unlocked(output: Path) -> dict:
+    targets = [output / name for name in (
+        "candidate-cleaned.jsonl", "candidate-decisions.jsonl",
+        "candidate-rejected.jsonl", "candidate-report.json",
+    )]
+    if any(path.exists() or path.with_suffix(".tmp").exists() for path in targets):
+        raise CleaningError("refusing to overwrite candidate output")
+    if not (output / "original-copy.jsonl").is_file() or not (output / "index.jsonl").is_file():
+        raise CleaningError("run prepare first")
+    overrides = _load_overrides(output)
+    counts = Counter()
+    sha = hashlib.sha256()
+    with (output / "candidate-cleaned.tmp").open("wb") as cleaned_out, (
+        output / "candidate-decisions.tmp"
+    ).open("wb") as decisions_out, (output / "candidate-rejected.tmp").open("wb") as rejected_out:
+        for _, _, record in _read_jsonl(output / "index.jsonl"):
+            row = _raw_row(output / "original-copy.jsonl", record)
+            reasons = list(record["precheck_reasons"])
+            repairs = list(record["repairs"])
+            override = overrides.pop(record["trace_id"], None)
+            if override is not None and override.get("raw_sha256") != record["raw_sha256"]:
+                raise CleaningError("audited override hash mismatch")
+            if not reasons:
+                assistant = row["messages"][2]
+                termination = row["termination"]
+                if termination.get("finish_reason") in {"length", "stream_interrupted"}:
+                    termination["truncated"] = True
+                    assistant["content_loss"] = False
+                if not (assistant.get("content") or "").strip():
+                    assistant["content_loss"] = False
+                if override is not None:
+                    if override["action"] == "reject":
+                        reasons.append("audited_override:" + override["reason_code"])
+                    elif override["action"] == "reasoning_only":
+                        assistant["content_loss"] = False
+                    elif override["action"] == "answer_only":
+                        assistant["reasoning_loss"] = False
+                assistant["loss"] = assistant["reasoning_loss"] or assistant["content_loss"]
+                if not assistant["loss"]:
+                    reasons.append("no_trainable_target")
+            decision = {
+                "policy": POLICY,
+                "review_scope": "deterministic_plus_audited_overrides",
+                "trace_id": record["trace_id"],
+                "raw_sha256": record["raw_sha256"],
+                "source_file": record["source_file"],
+                "source_line": record["source_line"],
+                "decision": "reject" if reasons else "keep",
+                "reasons": reasons,
+                "repairs": repairs,
+                "audited_override": override,
+            }
+            decisions_out.write(_line(decision))
+            counts[decision["decision"]] += 1
+            counts["audited_override"] += override is not None
+            for reason in reasons:
+                counts["reason:" + reason] += 1
+            for repair in repairs:
+                counts["repair:" + repair] += 1
+            if reasons:
+                rejected_out.write(_line({
+                    "trace_id": record["trace_id"], "reasons": reasons,
+                    "source_file": record["source_file"], "source_line": record["source_line"],
+                }))
+            else:
+                raw = _line(row)
+                cleaned_out.write(raw)
+                sha.update(raw)
+    if overrides:
+        raise CleaningError(f"audited overrides have no matching rows: {list(overrides)[:3]}")
+    for name in ("candidate-cleaned", "candidate-decisions", "candidate-rejected"):
+        (output / f"{name}.tmp").replace(output / f"{name}.jsonl")
+    report = {
+        "policy": POLICY,
+        "review_scope": "deterministic_plus_audited_overrides",
+        "scientific_correctness_verified": False,
+        "original_copy": str((output / "original-copy.jsonl").resolve()),
+        "candidate_cleaned": str((output / "candidate-cleaned.jsonl").resolve()),
+        "candidate_cleaned_sha256": sha.hexdigest(),
+        "counts": dict(counts),
+    }
+    (output / "candidate-report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return report
 
 
 def _finalize_unlocked(output: Path) -> dict:
@@ -478,6 +605,17 @@ def _finalize_unlocked(output: Path) -> dict:
     reviews = {}
     for _, _, item in _read_jsonl(output / REVIEW_FILE):
         reviews[item["trace_id"]] = item
+    missing = [
+        record["trace_id"]
+        for _, _, record in _read_jsonl(output / "index.jsonl")
+        if not record["precheck_reasons"] and record["trace_id"] not in reviews
+    ]
+    if missing:
+        raise CleaningError(
+            f"semantic review is incomplete for {len(missing)} rows; "
+            f"first missing trace: {missing[0]}"
+        )
+    overrides = _load_overrides(output)
     counts = Counter()
     sha = hashlib.sha256()
     with (output / "cleaned.tmp").open("wb") as cleaned_out, (output / "decisions.tmp").open(
@@ -488,19 +626,25 @@ def _finalize_unlocked(output: Path) -> dict:
             model_review = reviews.get(record["trace_id"])
             if model_review is not None and model_review.get("raw_sha256") != record["raw_sha256"]:
                 raise CleaningError("review hash mismatch")
-            cleaned, decision = _decide(row, record, model_review)
+            override = overrides.pop(record["trace_id"], None)
+            if override is not None and override.get("raw_sha256") != record["raw_sha256"]:
+                raise CleaningError("audited override hash mismatch")
+            cleaned, decision = _decide(row, record, model_review, override)
             decision_out.write(_line(decision))
             counts[decision["decision"]] += 1
             for reason in decision["reasons"]:
                 counts["reason:" + reason] += 1
             for repair in decision["repairs"]:
                 counts["repair:" + repair] += 1
+            counts["audited_override"] += override is not None
             if cleaned is None:
                 rejected_out.write(_line({k: decision[k] for k in ("trace_id", "reasons", "source_file", "source_line")}))
             else:
                 raw = _line(cleaned)
                 cleaned_out.write(raw)
                 sha.update(raw)
+    if overrides:
+        raise CleaningError(f"audited overrides have no matching rows: {list(overrides)[:3]}")
     for name in ("cleaned", "decisions", "rejected"):
         (output / f"{name}.tmp").replace(output / f"{name}.jsonl")
     report = {
@@ -534,6 +678,8 @@ def main() -> None:
     rev.add_argument("--trace-id")
     fin = sub.add_parser("finalize")
     fin.add_argument("--output", type=Path, required=True)
+    candidate = sub.add_parser("finalize-candidate")
+    candidate.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.mode == "prepare":
         result = prepare(args.db, args.source_root, args.output)
@@ -543,6 +689,8 @@ def main() -> None:
         result = review(args.output, model=args.model, workers=args.workers,
                         max_tokens=args.max_tokens, timeout=args.timeout,
                         limit=args.limit, trace_id=args.trace_id)
+    elif args.mode == "finalize-candidate":
+        result = finalize_candidate(args.output)
     else:
         result = finalize(args.output)
     print(json.dumps(result, ensure_ascii=False, indent=2))

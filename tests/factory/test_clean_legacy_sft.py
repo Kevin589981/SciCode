@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from factory.reasoning.clean_legacy_sft import (
+    CleaningError,
     REVIEW_FILE,
     REVIEW_POLICY,
     _decide,
@@ -12,6 +13,7 @@ from factory.reasoning.clean_legacy_sft import (
     _precheck,
     _review_prompt,
     finalize,
+    finalize_candidate,
     prepare,
 )
 from factory.reasoning.schema import canonical_hash
@@ -91,6 +93,19 @@ class LegacySftCleaningTests(unittest.TestCase):
         self.assertIsNone(cleaned)
         self.assertIn("task_flawed", decision["reasons"])
 
+    def test_audited_override_can_reject_a_model_false_negative(self):
+        task = task_for()
+        row = old_row(task, answer="answer", interrupted=False)
+        record = {"trace_id": "trace-1", "raw_sha256": "abc", "source_file": "source", "source_line": 1,
+                  "precheck_reasons": [], "repairs": []}
+        review = {"verdict": {"task_status": "sound", "reasoning_status": "train",
+                              "answer_status": "train"}}
+        override = {"action": "reject", "reason_code": "violates_exact_requirement",
+                    "explanation": "A concrete counterexample violates an exact task constraint."}
+        cleaned, decision = _decide(row, record, review, override)
+        self.assertIsNone(cleaned)
+        self.assertIn("audited_override:violates_exact_requirement", decision["reasons"])
+
     def test_review_requires_complete_verdict(self):
         response = {"choices": [{"message": {"content": json.dumps({
             "task_status": "sound", "reasoning_status": "train", "answer_status": "exclude",
@@ -133,6 +148,15 @@ class LegacySftCleaningTests(unittest.TestCase):
             manifest = prepare(db, source, output)
             self.assertEqual(manifest["counts"]["rows"], 1)
             self.assertEqual(sft_path.read_bytes(), original)
+            candidate = finalize_candidate(output)
+            self.assertEqual(candidate["counts"]["keep"], 1)
+            self.assertFalse(candidate["scientific_correctness_verified"])
+            candidate_row = json.loads((output / "candidate-cleaned.jsonl").read_text(encoding="utf-8"))
+            self.assertFalse(candidate_row["messages"][-1]["content_loss"])
+            (output / REVIEW_FILE).touch()
+            with self.assertRaisesRegex(CleaningError, "semantic review is incomplete"):
+                finalize(output)
+            self.assertFalse((output / "cleaned.jsonl").exists())
             index = json.loads((output / "index.jsonl").read_text(encoding="utf-8"))
             review = {
                 "policy": REVIEW_POLICY, "trace_id": index["trace_id"],
