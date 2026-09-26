@@ -20,6 +20,7 @@ from pathlib import Path
 
 from ..author import llm
 from .author import _json_objects
+from .batch import controller_lock
 from .schema import canonical_hash, validate_task
 
 POLICY = "legacy-scientific-sft-clean-v1"
@@ -128,9 +129,14 @@ def _precheck(row: dict, task: dict | None) -> tuple[list[str], list[str]]:
 
 
 def prepare(db: Path, source_root: Path, output: Path) -> dict:
+    output.mkdir(parents=True, exist_ok=True)
+    with controller_lock(output / REVIEW_FILE, exclusive=True):
+        return _prepare_unlocked(db, source_root, output)
+
+
+def _prepare_unlocked(db: Path, source_root: Path, output: Path) -> dict:
     if not db.is_file() or not source_root.is_dir():
         raise CleaningError("source queue or root is missing")
-    output.mkdir(parents=True, exist_ok=True)
     raw_path = output / "original-copy.jsonl"
     index_path = output / "index.jsonl"
     for path in (raw_path, index_path, raw_path.with_suffix(".tmp"), index_path.with_suffix(".tmp")):
@@ -340,6 +346,13 @@ def _review_one(record: dict, raw_path: Path, model: str, max_tokens: int, timeo
 
 def review(output: Path, *, model: str, workers: int, max_tokens: int, timeout: int,
            limit: int | None = None, trace_id: str | None = None) -> dict:
+    with controller_lock(output / REVIEW_FILE, exclusive=True):
+        return _review_unlocked(output, model=model, workers=workers, max_tokens=max_tokens,
+                                timeout=timeout, limit=limit, trace_id=trace_id)
+
+
+def _review_unlocked(output: Path, *, model: str, workers: int, max_tokens: int, timeout: int,
+                     limit: int | None = None, trace_id: str | None = None) -> dict:
     raw_path = output / "original-copy.jsonl"
     index_path = output / "index.jsonl"
     review_path = output / REVIEW_FILE
@@ -451,6 +464,11 @@ def _decide(row: dict, record: dict, model_review: dict | None) -> tuple[dict | 
 
 
 def finalize(output: Path) -> dict:
+    with controller_lock(output / REVIEW_FILE, exclusive=True):
+        return _finalize_unlocked(output)
+
+
+def _finalize_unlocked(output: Path) -> dict:
     for name in ("original-copy.jsonl", "index.jsonl", REVIEW_FILE):
         if not (output / name).is_file():
             raise CleaningError(f"missing required file: {name}")
