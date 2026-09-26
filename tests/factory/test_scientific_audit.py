@@ -72,6 +72,25 @@ class ScientificAuditTests(unittest.TestCase):
         self.assertEqual(audit_row(row(content_loss=False), chat_fn=chat)["disposition"],
                          "reasoning_candidate")
 
+    def test_truncated_answer_cannot_be_approved(self):
+        sample = row()
+        sample["termination"] = {"finish_reason": "length", "truncated": True}
+
+        def chat(messages, **_kwargs):
+            return response(PLAN if "INDEPENDENT PLAN:" not in messages[0]["content"]
+                            else check("satisfied"))
+
+        self.assertEqual(audit_row(sample, chat_fn=chat)["disposition"],
+                         "reasoning_candidate")
+
+    def test_final_json_must_not_be_recovered_from_private_thinking(self):
+        def chat(_messages, **_kwargs):
+            return {"choices": [{"message": {"content": "", "reasoning_content": json.dumps(PLAN)},
+                                 "finish_reason": "length"}]}
+
+        with self.assertRaisesRegex(AuditError, "truncated"):
+            audit_row(row(), chat_fn=chat)
+
     def test_missing_check_fails_closed(self):
         with self.assertRaises(AuditError):
             _validate_checks({"checks": [], "critical_issue": "", "summary": ""}, PLAN, "answer")
@@ -86,17 +105,57 @@ class ScientificAuditTests(unittest.TestCase):
 
             def chat(messages, **_kwargs):
                 calls.append(messages[0]["content"])
-                return response(PLAN if len(calls) % 2 else check("satisfied"))
+                if len(calls) == 1:
+                    return response(PLAN)
+                if len(calls) == 2:
+                    return response(check("satisfied"))
+                return response({"status": "consistent", "conflicts": [],
+                                 "rationale": "No cross-requirement contradiction"})
 
             first = run_audit(input_path, output_path, workers=1, chat_fn=chat)
             self.assertEqual(first["model_supported_answer"], 1)
             self.assertEqual(input_path.read_bytes(), original)
             self.assertEqual(run_audit(input_path, output_path, workers=1, chat_fn=chat)["skipped"], 1)
-            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls), 3)
             changed = row(answer="changed")
             input_path.write_text(json.dumps(changed) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(AuditError, "changed input row"):
                 run_audit(input_path, output_path, workers=1, chat_fn=chat)
+
+    def test_cross_requirement_conflict_overrides_optimistic_checks(self):
+        plan = {"task_status": "answerable", "task_issue": "", "requirements": [
+            {"id": "R1", "requirement": "Full containment scores exactly 1",
+             "kind": "exact", "probe": "Unit box inside large crop"},
+            {"id": "R2", "requirement": "Disclose the denominator floor tradeoff",
+             "kind": "qualitative", "probe": "Sub-unit box inside crop"},
+        ]}
+        satisfied = {"checks": [
+            {"id": "R1", "status": "satisfied", "answer_evidence": "formula says 1",
+             "probe_result": "unit box gives 1", "explanation": "unit-area case passes"},
+            {"id": "R2", "status": "satisfied", "answer_evidence": "max(area, 1)",
+             "probe_result": "fully contained area 0.25 gives 0.25, not exact 1",
+             "explanation": "disclosed floor distortion"},
+        ], "critical_issue": "", "summary": "all satisfied"}
+        calls = []
+
+        def chat(messages, **_kwargs):
+            calls.append(messages[0]["content"])
+            if len(calls) == 1:
+                return response(plan)
+            if len(calls) == 2:
+                return response(satisfied)
+            return response({"status": "conflict", "conflicts": [{
+                "required_id": "R1", "evidence_id": "R2",
+                "input": "fully contained area 0.25",
+                "required": "1", "delivered": "0.25",
+                "explanation": "denominator floor breaks exact containment",
+            }], "rationale": "Disclosure does not satisfy R1"})
+
+        result = audit_row(row(answer="IoF = intersection / max(box_area, 1)"),
+                           chat_fn=chat)
+        self.assertEqual(result["disposition"], "quarantine")
+        self.assertEqual(result["consistency"]["conflicts"][0]["required_id"], "R1")
+        self.assertNotIn("PRIVATE LONG THINKING", calls[2])
 
     def test_selection_masks_unverified_answer_but_keeps_reasoning(self):
         with tempfile.TemporaryDirectory() as temporary:

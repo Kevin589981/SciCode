@@ -49,20 +49,23 @@ inspect `batch.sqlite3`, per-repository reports, and `accepted-sft.jsonl`.
 ## Post-export scientific answer audit
 
 `scientific_audit.py` is an optional post-export stage for both the stopped v1
-candidate corpus and future SFT JSONL. One Kimi model is called twice per row:
-first with the *question only* to enumerate atomic requirements and design
-independent boundary probes, then with the question, frozen probes, and final
-answer to test each requirement. The long thinking text and old judge scores
-are deliberately absent from both calls. This avoids having a persuasive but
-incorrect explanation bias the answer check; it does **not** make a same-model
-review independent ground truth.
+candidate corpus and future SFT JSONL. One Kimi model is used in separate
+contexts: first with the *question only* to enumerate atomic requirements and
+design independent boundary probes, then with the question, frozen probes, and
+final answer to test each requirement. If all checks pass, a third compact
+review compares the findings **across** requirements for admitted
+counterexamples. The long thinking text and old judge scores are deliberately
+absent from all calls. This avoids having a persuasive but incorrect explanation
+bias the answer check; it does **not** make a same-model review independent
+ground truth. The cross-requirement stage was added because the two-stage
+version wrongly approved a known sub-unit-box IoF counterexample.
 
 Run a bounded smoke first (the source JSONL is read-only):
 
 ```bash
 python -m factory.reasoning.scientific_audit review \
   --input data-reasoning-10k-v1-cleaned-v1/candidate-cleaned.jsonl \
-  --out data-reasoning-10k-v1-cleaned-v1/scientific-audit-v1.jsonl \
+  --out data-reasoning-10k-v1-cleaned-v1/scientific-audit-v2.jsonl \
   --model Kimi-K3 --workers 4 --limit 10
 ```
 
@@ -73,8 +76,8 @@ without `--limit` to cover the complete corpus. Only then run `select` into a
 ```bash
 python -m factory.reasoning.scientific_audit select \
   --input data-reasoning-10k-v1-cleaned-v1/candidate-cleaned.jsonl \
-  --audit data-reasoning-10k-v1-cleaned-v1/scientific-audit-v1.jsonl \
-  --out-dir data-reasoning-10k-v1-cleaned-v1/scientific-audit-selected-v1
+  --audit data-reasoning-10k-v1-cleaned-v1/scientific-audit-v2.jsonl \
+  --out-dir data-reasoning-10k-v1-cleaned-v1/scientific-audit-selected-v2
 ```
 
 `model-supported-answer.jsonl` contains answers that the audit found to meet

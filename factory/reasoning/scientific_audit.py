@@ -21,7 +21,7 @@ from ..author import llm
 from .author import _json_objects
 from .batch import controller_lock
 
-POLICY = "scientific-answer-audit-v1"
+POLICY = "scientific-answer-audit-v2"
 
 
 class AuditError(ValueError):
@@ -60,16 +60,18 @@ def _sample(row: dict) -> tuple[str, str, str, bool]:
 
 def _object(response: dict) -> dict:
     try:
-        message = response["choices"][0]["message"]
+        choice = response["choices"][0]
+        message = choice["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise AuditError("review response has no assistant message") from exc
-    # A complete JSON object may be in content or native thinking. Prefer the
-    # final answer, but never train on a partial or malformed review.
-    for field in ("content", "reasoning_content"):
-        for value in _json_objects(message.get(field) or ""):
-            if isinstance(value, dict):
-                return value
-    raise AuditError("review response has no complete JSON object")
+    if choice.get("finish_reason") in {"length", "stream_interrupted"}:
+        raise AuditError("review response was truncated")
+    # The private thinking can contain speculative JSON. Accept only a
+    # complete object in the model's final content.
+    for value in _json_objects(message.get("content") or ""):
+        if isinstance(value, dict):
+            return value
+    raise AuditError("review response has no complete final JSON object")
 
 
 def _requirements_prompt(prompt: str) -> str:
@@ -158,6 +160,50 @@ def _validate_checks(value: dict, plan: dict, answer: str) -> dict:
     return value
 
 
+def _consistency_prompt(plan: dict, verdict: dict) -> str:
+    return f"""You are a SEPARATE final contradiction checker. You do not see the
+student answer or the earlier review's confidence score. Only use the atomic
+requirements and the review's concrete findings below. Look for a case where
+one finding admits a delivered result that contradicts ANY other exact or
+universal requirement, even when that finding calls the mismatch a caveat,
+limitation, floor, approximation, or disclosed side effect. Disclosure does
+NOT satisfy an exact requirement. Compare evidence across requirement IDs,
+not just within one check. Do not add an unstated domain restriction. If the
+evidence is insufficient, say uncertain rather than assuming consistency.
+
+REQUIREMENTS AND INDEPENDENT PROBES:\n{json.dumps(plan, ensure_ascii=False)}\n
+ANSWER CHECKS:\n{json.dumps(verdict, ensure_ascii=False)}\n
+Return ONLY JSON:
+{{"status":"consistent|conflict|uncertain", "conflicts":[
+{{"required_id":"R1", "evidence_id":"R2", "input":"concrete case",
+"required":"exact required result", "delivered":"answer-implied result",
+"explanation":"why this contradicts the hard requirement"}}],
+"rationale":"brief justification"}}
+If any concrete contradiction exists, status MUST be conflict. If a result
+cannot be established, status is uncertain. For consistent, conflicts is [].
+"""
+
+
+def _validate_consistency(value: dict, plan: dict) -> dict:
+    if value.get("status") not in {"consistent", "conflict", "uncertain"}:
+        raise AuditError("invalid consistency status")
+    if not isinstance(value.get("rationale"), str) or not value["rationale"].strip():
+        raise AuditError("consistency rationale is missing")
+    conflicts = value.get("conflicts")
+    if not isinstance(conflicts, list):
+        raise AuditError("consistency conflicts must be a list")
+    if bool(conflicts) != (value["status"] == "conflict"):
+        raise AuditError("consistency status and conflicts disagree")
+    ids = {item["id"] for item in plan["requirements"]}
+    for conflict in conflicts:
+        if not isinstance(conflict, dict) or conflict.get("required_id") not in ids or conflict.get("evidence_id") not in ids:
+            raise AuditError("consistency conflict references unknown requirement")
+        for name in ("input", "required", "delivered", "explanation"):
+            if not isinstance(conflict.get(name), str) or not conflict[name].strip():
+                raise AuditError(f"consistency conflict has empty {name}")
+    return value
+
+
 def audit_row(
     row: dict,
     *,
@@ -169,6 +215,12 @@ def audit_row(
 ) -> dict:
     """Run two blinded stages with the same reviewer model."""
     trace_id, prompt, answer, content_loss = _sample(row)
+    termination = row.get("termination") or {}
+    if isinstance(termination, dict) and (
+        termination.get("truncated") is True
+        or termination.get("finish_reason") in {"length", "stream_interrupted"}
+    ):
+        content_loss = False
     first_prompt = _requirements_prompt(prompt)
     if len(first_prompt) > max_input_chars:
         raise AuditError("requirement input exceeds max_input_chars")
@@ -186,17 +238,34 @@ def audit_row(
     )
     verdict = _validate_checks(_object(second_response), plan, answer)
     statuses = {item["status"] for item in verdict["checks"]}
-    if plan["task_status"] != "answerable" or "violated" in statuses:
+    consistency = None
+    third_response = None
+    if plan["task_status"] == "answerable" and statuses == {"satisfied"} and answer.strip() and content_loss:
+        third_prompt = _consistency_prompt(plan, verdict)
+        if len(third_prompt) > max_input_chars:
+            raise AuditError("consistency input exceeds max_input_chars")
+        third_response = chat_fn(
+            [{"role": "user", "content": third_prompt}], model=model,
+            temperature=0.0, max_tokens=max_tokens, timeout=timeout,
+        )
+        consistency = _validate_consistency(_object(third_response), plan)
+    if plan["task_status"] != "answerable" or "violated" in statuses or (
+        consistency is not None and consistency["status"] == "conflict"
+    ):
         disposition = "quarantine"
-    elif "unverifiable" in statuses or not answer.strip() or not content_loss:
+    elif "unverifiable" in statuses or not answer.strip() or not content_loss or (
+        consistency is not None and consistency["status"] == "uncertain"
+    ):
         disposition = "reasoning_candidate"
     else:
         disposition = "model_supported_answer"
     return {
         "policy": POLICY, "trace_id": trace_id, "model": model,
         "disposition": disposition, "plan": plan, "verdict": verdict,
+        "consistency": consistency,
         "usage": {"plan": first_response.get("usage") or {},
-                  "answer": second_response.get("usage") or {}},
+                  "answer": second_response.get("usage") or {},
+                  "consistency": (third_response or {}).get("usage") or {}},
     }
 
 
