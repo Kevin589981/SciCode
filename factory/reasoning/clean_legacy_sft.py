@@ -504,7 +504,9 @@ def _load_overrides(output: Path) -> dict[str, dict]:
 
 def finalize_candidate(output: Path) -> dict:
     """Deliver a deterministic candidate while exhaustive semantic review runs."""
-    with controller_lock(output / REVIEW_FILE, exclusive=True):
+    # The inventory is immutable after prepare. The model reviewer only appends
+    # its own file, so candidate export can safely run alongside that review.
+    with controller_lock(output / "candidate-cleaned.jsonl", exclusive=True):
         return _finalize_candidate_unlocked(output)
 
 
