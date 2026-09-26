@@ -416,6 +416,10 @@ def materialize(input_path: Path, audit_path: Path, output_dir: Path) -> dict:
                             raise AuditError(f"answer approval contradicts loss flag: {identity}")
                         answer_row = copy.deepcopy(row)
                         answer_assistant = answer_row["messages"][-1]
+                        suppressed_reasoning_sha = hashlib.sha256(
+                            (answer_assistant.get("reasoning_content") or "").encode("utf-8")
+                        ).hexdigest()
+                        answer_assistant["reasoning_content"] = ""
                         answer_assistant["reasoning_loss"] = False
                         answer_assistant["loss"] = True
                         answer_row["scientific_audit"] = {
@@ -424,6 +428,7 @@ def materialize(input_path: Path, audit_path: Path, output_dir: Path) -> dict:
                             "row_sha256": digest, "disposition": disposition,
                             "supervision_target": "answer",
                             "scientific_correctness_proven": False,
+                            "suppressed_reasoning_sha256": suppressed_reasoning_sha,
                         }
                         answers.write((json.dumps(answer_row, ensure_ascii=False) + "\n").encode())
                         counts["answer_output_rows"] += 1

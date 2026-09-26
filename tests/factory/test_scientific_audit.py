@@ -122,6 +122,8 @@ class ScientificAuditTests(unittest.TestCase):
                                     .read_text(encoding="utf-8"))
             self.assertFalse(answer_row["messages"][-1]["reasoning_loss"])
             self.assertTrue(answer_row["messages"][-1]["content_loss"])
+            self.assertEqual(answer_row["messages"][-1]["reasoning_content"], "")
+            self.assertTrue(answer_row["scientific_audit"]["suppressed_reasoning_sha256"])
             self.assertEqual(run_audit(input_path, output_path, workers=1, chat_fn=chat)["skipped"], 1)
             self.assertEqual(len(calls), 3)
             changed = row(answer="changed")

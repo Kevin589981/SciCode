@@ -81,8 +81,8 @@ python -m factory.reasoning.scientific_audit select \
 ```
 
 `model-supported-answer.jsonl` contains answers that the audit found to meet
-every extracted requirement, with `reasoning_loss=false` because this stage
-does not inspect every thought step. `reasoning-candidates.jsonl` separately
+every extracted requirement, with `reasoning_loss=false` and blank thinking
+because this stage does not inspect every thought step. `reasoning-candidates.jsonl` separately
 retains thinking from every non-quarantined row with `content_loss=false` and
 blank final `content`; it is exploratory reasoning supervision, not certified
 correct thinking. A trace may appear in both files with distinct loss masks.
