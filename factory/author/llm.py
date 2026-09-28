@@ -82,14 +82,18 @@ def chat(
     *,
     model: str | None = None,
     temperature: float = 0.0,
+    top_p: float | None = None,
+    seed: int | None = None,
     max_tokens: int = 4096,
     retries: int = 3,
     timeout: int = 900,
     allow_partial: bool = False,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> dict:
     """Return a complete response, or a marked partial solver response."""
-    cfg = client_config()
-    url = cfg["base_url"] + "/chat/completions"
+    cfg = client_config() if not (base_url and api_key and model) else None
+    url = (base_url or cfg["base_url"]).rstrip("/") + "/chat/completions"
     payload = {
         "model": model or cfg["model"],
         "messages": messages,
@@ -98,6 +102,10 @@ def chat(
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if seed is not None:
+        payload["seed"] = seed
     body = json.dumps(payload).encode()
     last = None
     for attempt in range(retries):
@@ -108,7 +116,7 @@ def chat(
                 method="POST",
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {cfg['api_key']}",
+                    "Authorization": f"Bearer {api_key or cfg['api_key']}",
                 },
             )
             # urllib's timeout applies to each blocking read. SSE permits long

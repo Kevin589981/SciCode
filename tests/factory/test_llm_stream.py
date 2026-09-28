@@ -90,6 +90,30 @@ class StreamingLLMTests(unittest.TestCase):
         result = llm._stream_response(FakeResponse(body), allow_partial=False)
         self.assertEqual(result["choices"][0]["finish_reason"], "stop")
 
+    def test_role_endpoint_and_sampling_fields_do_not_require_global_config(self):
+        body = event({"reasoning_content": "own thought", "content": "answer"})
+        body += event(finish_reason="stop")
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            llm.urllib.request, "urlopen", return_value=FakeResponse(body)
+        ) as call:
+            result = llm.chat(
+                [{"role": "user", "content": "natural question"}],
+                model="Qwen-base",
+                base_url="http://qwen.internal/v1",
+                api_key="test-key",
+                temperature=0.9,
+                top_p=0.85,
+                seed=123,
+            )
+        request = call.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(request.full_url, "http://qwen.internal/v1/chat/completions")
+        self.assertEqual(payload["temperature"], 0.9)
+        self.assertEqual(payload["top_p"], 0.85)
+        self.assertEqual(payload["seed"], 123)
+        self.assertEqual(result["choices"][0]["message"]["reasoning_content"],
+                         "own thought")
+
 
 if __name__ == "__main__":
     unittest.main()
