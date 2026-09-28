@@ -33,8 +33,8 @@ from .queue import (
 )
 from .schema import canonical_hash
 
-JOB_KIND = "freeform_coding_seed_v1"
-RECIPE_SCHEMA = "scicode-freeform-coding-recipe-v1"
+JOB_KIND = "freeform_coding_seed_v2"
+RECIPE_SCHEMA = "scicode-freeform-coding-recipe-v2"
 SEED_SCHEMA = "scicode-freeform-seed-v1"
 SOURCE_SUFFIXES = {
     ".py", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".f", ".f90",

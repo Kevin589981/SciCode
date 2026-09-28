@@ -99,6 +99,7 @@ class FreeformPipelineTests(unittest.TestCase):
         self.assertEqual(len(set(prompts)), 3)
         for prompt in prompts:
             self.assertIn("代码交付", prompt)
+            self.assertIn("方法与实现细节留给解题者选择", prompt)
             self.assertIn("内部核查", prompt)
             self.assertIn(SEED["source"]["excerpt"], prompt)
             self.assertNotIn("archetype_payload", prompt)

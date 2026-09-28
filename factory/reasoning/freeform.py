@@ -16,12 +16,12 @@ from ..author import llm
 from .author import _json_objects
 from .schema import canonical_hash
 
-TASK_SCHEMA = "scicode-freeform-coding-task-v1"
+TASK_SCHEMA = "scicode-freeform-coding-task-v2"
 TRACE_SCHEMA = "scicode-qwen-native-trace-v1"
 AUDIT_SCHEMA = "scicode-freeform-coding-audit-v1"
 AUDIT_POLICY = "scientific-coding-overall-v2"
-SFT_SCHEMA = "scicode-qwen-native-coding-sft-v1"
-AUTHOR_PROMPT_POLICY = "freeform-scientific-coding-v1"
+SFT_SCHEMA = "scicode-qwen-native-coding-sft-v2"
+AUTHOR_PROMPT_POLICY = "freeform-scientific-coding-v2"
 AUTHOR_OPENERS = (
     "从下面的科学代码出发，写一道值得动手解决的科学编程题。",
     "阅读这段真实项目源码后，提出一个需要科学推理并产出代码的问题。",
@@ -66,9 +66,9 @@ def author_messages(seed: dict, prompt_variant: int = 0) -> list[dict]:
     opener = AUTHOR_OPENERS[prompt_variant % len(AUTHOR_OPENERS)]
     prompt = (
         opener
-        + "\n题面自然写清必要的科学背景、要解决的科学或数值问题与代码交付物；"
-        "具体问题、解法和代码形式由你决定。"
-        "同时写一份含相应代码、仅供内部核查的参考答案。"
+        + "\n题面围绕素材中的核心科学或数值问题，自含必要背景和代码交付目标；"
+        "把方法与实现细节留给解题者选择。"
+        "同时写一份仅供内部核查的简要参考答案。"
         "返回 JSON 对象，包含 question 和 reference_answer 两个字符串字段。\n\n"
         "素材：\n" + json.dumps(context, ensure_ascii=False)
     )
