@@ -23,6 +23,11 @@
       --seeds .cache/freeform-v4-smoke/seeds.jsonl --index 0 \
       --out .cache/freeform-v4-smoke/author-task.json --master-seed 2026
 
+    "$PY" -m factory.reasoning.freeform_batch trace-smoke \
+      --task .cache/freeform-v4-smoke/author-task.json \
+      --out .cache/freeform-v4-smoke/trace-check \
+      --solver-model BASE_QWEN_MODEL_NAME --attempts 2 --master-seed 2026
+
     "$PY" -m factory.reasoning.freeform_batch enqueue \
       --db .cache/freeform-v4-smoke/queue.sqlite \
       --seeds .cache/freeform-v4-smoke/seeds.jsonl \

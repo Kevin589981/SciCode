@@ -396,6 +396,18 @@ def main() -> None:
     author.add_argument("--max-tokens", type=int, default=16384)
     author.add_argument("--timeout", type=int, default=2400)
 
+    trace_smoke = commands.add_parser("trace-smoke")
+    trace_smoke.add_argument("--task", type=Path, required=True)
+    trace_smoke.add_argument("--out", type=Path, required=True)
+    trace_smoke.add_argument("--solver-model", required=True)
+    trace_smoke.add_argument("--audit-model", default="Kimi-K3")
+    trace_smoke.add_argument("--attempts", type=int, default=2)
+    trace_smoke.add_argument("--master-seed", type=int, default=1)
+    trace_smoke.add_argument("--solver-max-tokens", type=int, default=32768)
+    trace_smoke.add_argument("--audit-max-tokens", type=int, default=8192)
+    trace_smoke.add_argument("--timeout", type=int, default=2400)
+    trace_smoke.add_argument("--send-seed", action="store_true")
+
     enqueue = commands.add_parser("enqueue")
     enqueue.add_argument("--db", type=Path, required=True)
     enqueue.add_argument("--seeds", type=Path, required=True)
@@ -446,6 +458,40 @@ def main() -> None:
         )
         atomic_json(args.out, task)
         result = {"task_id": task["task_id"], "question": task["question"],
+                  "output": str(args.out)}
+    elif args.command == "trace-smoke":
+        task = validate_task(_read_json(args.task))
+        args.out.mkdir(parents=True, exist_ok=True)
+        traces, audits, rows = [], [], []
+        for attempt in range(args.attempts):
+            trace_path = args.out / f"trace-{attempt}.json"
+            trace = _read_json(trace_path) if trace_path.exists() else collect_trace(
+                task, attempt=attempt,
+                sample=sample_parameters(task["task_id"], attempt, args.master_seed),
+                model=args.solver_model, **_role_endpoint("qwen"),
+                send_seed=args.send_seed, max_tokens=args.solver_max_tokens,
+                timeout=args.timeout,
+            )
+            if not trace_path.exists():
+                atomic_json(trace_path, trace)
+            traces.append(trace)
+            audit_path = args.out / f"audit-{attempt}.json"
+            audit = _read_json(audit_path) if audit_path.exists() else audit_trace(
+                task, trace, model=args.audit_model, **_role_endpoint("kimi"),
+                max_tokens=args.audit_max_tokens, timeout=args.timeout,
+            )
+            if not audit_path.exists():
+                atomic_json(audit_path, audit)
+            audits.append(audit)
+            row = training_row(task, trace, audit)
+            if row is not None:
+                rows.append(row)
+        atomic_jsonl(args.out / "traces.jsonl", traces)
+        atomic_jsonl(args.out / "audits.jsonl", audits)
+        atomic_jsonl(args.out / "native-sft.jsonl", rows)
+        atomic_jsonl(args.out / "train.jsonl",
+                     [training_projection(row) for row in rows])
+        result = {"traces": len(traces), "accepted": len(rows),
                   "output": str(args.out)}
     elif args.command == "enqueue":
         result = enqueue_seeds(
