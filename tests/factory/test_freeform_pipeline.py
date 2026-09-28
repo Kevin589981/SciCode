@@ -71,6 +71,7 @@ def fake_chat(messages, **kwargs):
         )
     if model == "kimi-audit":
         return response(json.dumps({
+            "key_check": "题面给定平方关系；回答在条件不变时据此推得四倍。",
             "verdict": "accept",
             "reason": "推理与平方关系一致，限定条件也写明。",
         }, ensure_ascii=False))
@@ -107,6 +108,7 @@ class FreeformPipelineTests(unittest.TestCase):
         self.assertEqual(audit["policy_version"], AUDIT_POLICY)
         row = training_row(task, trace, audit)
         self.assertEqual(row["schema_version"], SFT_SCHEMA)
+        self.assertEqual(row["audit"]["key_check"], audit["key_check"])
         self.assertEqual(row["messages"][1]["reasoning_content"],
                          trace["reasoning_content"])
         projected = training_projection(row)
@@ -137,6 +139,36 @@ class FreeformPipelineTests(unittest.TestCase):
             max_tokens=1000, timeout=20,
         )
         self.assertEqual(trace["reasoning_content"], "继续推理")
+        self.assertIsNone(training_row(task, trace, audit))
+
+    def test_invalid_audit_verdict_is_quarantined_with_raw_response(self):
+        task = compose_task(
+            SEED, chat_fn=fake_chat, model="kimi-author",
+            base_url="http://kimi/v1", api_key="dummy",
+            temperature=0.9, top_p=0.95, request_seed=None,
+            max_tokens=1000, timeout=20,
+        )
+        trace = collect_trace(
+            task, attempt=0, sample=sample_parameters(task["task_id"], 0, 1),
+            chat_fn=fake_chat, model="qwen-base",
+            base_url="http://qwen/v1", api_key="dummy",
+            send_seed=False, max_tokens=1000, timeout=20,
+        )
+
+        def invalid_review(messages, **kwargs):
+            return response(json.dumps({
+                "key_check": "已核对题目与回答。",
+                "verdict": "mostly_accept",
+                "reason": "判定值不在协议内。",
+            }, ensure_ascii=False))
+
+        audit = audit_trace(
+            task, trace, chat_fn=invalid_review, model="kimi-audit",
+            base_url="http://kimi/v1", api_key="dummy",
+            max_tokens=1000, timeout=20,
+        )
+        self.assertEqual(audit["verdict"], "uncertain")
+        self.assertIn("mostly_accept", audit["reason"])
         self.assertIsNone(training_row(task, trace, audit))
 
     def test_prepared_catalog_queue_resume_and_aggregate(self):

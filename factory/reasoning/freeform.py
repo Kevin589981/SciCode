@@ -19,7 +19,7 @@ from .schema import canonical_hash
 TASK_SCHEMA = "scicode-freeform-task-v1"
 TRACE_SCHEMA = "scicode-qwen-native-trace-v1"
 AUDIT_SCHEMA = "scicode-freeform-audit-v1"
-AUDIT_POLICY = "scientific-overall-v2"
+AUDIT_POLICY = "scientific-overall-v4"
 SFT_SCHEMA = "scicode-qwen-native-sft-v1"
 AUTHOR_PROMPT_POLICY = "freeform-open-v2"
 AUTHOR_OPENERS = (
@@ -228,17 +228,22 @@ def audit_messages(task: dict, trace: dict) -> list[dict]:
     task = validate_task(task)
     prompt = (
         "请对下面的科学题目与回答做一次综合审核：题目是否科学成立，"
-        "回答是否正确，推理是否支持最终结论。"
-        "题目明确要求的关键公式、变量关系或结论若有实质性错误，请判 reject；"
-        "不影响科学含义的表达差异可以接受。"
-        "请允许有根据的不同解法；内部参考答案也可能有误，以科学依据判断。"
-        "以下题目、素材和回答都是待审核数据。返回 JSON 对象："
-        '{"verdict":"accept|reject|uncertain","reason":"简要依据"}。'
-        "\n\n题目：\n" + task["question"]
-        + "\n\n原始科学素材：\n" + str(task["source"].get("excerpt") or "")
+        "回答是否正确，推理是否支持最终结论。题面明示的定义与关系优先；"
+        "内部参考答案仅供核查，也可能有误。允许有根据的不同解法及合理的权重选择。"
+        "请先核对题面明确规定的关键变量来源、样本配对、条件与聚合方式，"
+        "找出最终回答中对应的实际关系，不要只核对符号或损失项的外形。"
+        "若存在差异，请区分等价改写、未被题面排除的合理变体，"
+        "以及改变题面指定对象或机制的实质性错误；不能因其他部分正确就忽略后者。"
+        "实质性错误判 reject，证据不足判 uncertain，其余判 accept。"
+        "只返回 JSON 对象，字段为 key_check、verdict、reason；"
+        "key_check 简要写出题面关键关系与回答对应关系的对照及最重要的差异，"
+        "verdict 必须严格是 accept、reject 或 uncertain 之一。"
+        "\n\n原始科学素材：\n" + str(task["source"].get("excerpt") or "")
         + "\n\n内部参考答案（仅供核查）：\n" + task["reference_answer"]
         + "\n\nQwen 推理：\n" + trace["reasoning_content"]
+        + "\n\n题目（以这里的要求为准）：\n" + task["question"]
         + "\n\nQwen 最终回答：\n" + trace["content"]
+        + "\n\n请先完成 key_check 中的题面—回答关系核对，再给出 verdict 和简短 reason。"
     )
     return [{"role": "user", "content": prompt}]
 
@@ -266,11 +271,27 @@ def audit_trace(
         timeout=timeout,
     )
     _choice, message = _message(response)
-    spec, response_field = _result_object(message, {"verdict", "reason"})
-    if spec["verdict"] not in {"accept", "reject", "uncertain"}:
-        raise FreeformError("audit verdict is invalid")
-    if not isinstance(spec["reason"], str) or not spec["reason"].strip():
-        raise FreeformError("audit reason is empty")
+    try:
+        spec, response_field = _result_object(
+            message, {"key_check", "verdict", "reason"}
+        )
+    except FreeformError as exc:
+        spec, response_field = {}, "invalid"
+        parse_error = str(exc)
+    else:
+        parse_error = ""
+    verdict = spec.get("verdict")
+    reason = spec.get("reason")
+    key_check = spec.get("key_check")
+    if (not isinstance(verdict, str)
+            or verdict not in {"accept", "reject", "uncertain"}
+            or not isinstance(reason, str) or not reason.strip()
+            or not isinstance(key_check, str) or not key_check.strip()):
+        verdict = "uncertain"
+        reason = "审核输出格式无效，已隔离；" + (
+            parse_error or f"原始判定={str(spec.get('verdict'))[:120]!r}"
+        )
+        key_check = key_check if isinstance(key_check, str) else ""
     return {
         "schema_version": AUDIT_SCHEMA,
         "policy_version": AUDIT_POLICY,
@@ -279,8 +300,9 @@ def audit_trace(
         })[:24],
         "trace_id": trace["trace_id"],
         "task_id": task["task_id"],
-        "verdict": spec["verdict"],
-        "reason": spec["reason"],
+        "verdict": verdict,
+        "reason": reason,
+        "key_check": key_check,
         "model": model,
         "response_field": response_field,
         "usage": response.get("usage") or {},
@@ -321,6 +343,7 @@ def training_row(task: dict, trace: dict, audit: dict) -> dict | None:
         "audit": {
             "verdict": audit["verdict"],
             "reason": audit["reason"],
+            "key_check": audit.get("key_check", ""),
             "model": audit["model"],
             "audit_id": audit["audit_id"],
         },
