@@ -21,10 +21,11 @@ TRACE_SCHEMA = "scicode-qwen-native-trace-v1"
 AUDIT_SCHEMA = "scicode-freeform-audit-v1"
 AUDIT_POLICY = "scientific-overall-v2"
 SFT_SCHEMA = "scicode-qwen-native-sft-v1"
+AUTHOR_PROMPT_POLICY = "freeform-open-v2"
 AUTHOR_OPENERS = (
-    "请根据下列科学代码素材，自由拟一道值得认真推理的科学问题。",
-    "把下面的科学代码当作灵感，提出一个有科学内容、值得探索的问题。",
-    "Use the scientific code below as inspiration for a substantive, natural question.",
+    "从下面的科学代码出发，写一个你认为有价值的科学问题。",
+    "下面是真实项目的源码。你会提出什么科学问题？",
+    "What scientific question would you ask after reading this source?",
 )
 
 
@@ -63,8 +64,7 @@ def author_messages(seed: dict, prompt_variant: int = 0) -> list[dict]:
     opener = AUTHOR_OPENERS[prompt_variant % len(AUTHOR_OPENERS)]
     prompt = (
         opener
-        + "\n题面自然地说明问题及需要的材料，让解题者自行选择思考方式。"
-        "同时给出仅供内部核查的参考答案。"
+        + "\n同时写一份仅供内部核查的参考答案。"
         "返回 JSON 对象，包含 question 和 reference_answer 两个字符串字段。\n\n"
         "素材：\n" + json.dumps(context, ensure_ascii=False)
     )
@@ -85,8 +85,9 @@ def compose_task(
     max_tokens: int,
     timeout: int,
 ) -> dict:
+    messages = author_messages(seed, prompt_variant)
     response = chat_fn(
-        author_messages(seed, prompt_variant),
+        messages,
         model=model,
         base_url=base_url,
         api_key=api_key,
@@ -118,6 +119,8 @@ def compose_task(
             "top_p": top_p,
             "request_seed": request_seed,
             "prompt_variant": prompt_variant % len(AUTHOR_OPENERS),
+            "prompt_policy": AUTHOR_PROMPT_POLICY,
+            "prompt_hash": canonical_hash(messages),
             "response_field": response_field,
             "finish_reason": choice.get("finish_reason"),
             "usage": response.get("usage") or {},

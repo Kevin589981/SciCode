@@ -2,6 +2,8 @@
 
 本分支的新流水线位于 factory/reasoning/freeform.py 与 freeform_batch.py。原有固定 archetype 流水线仍独立可用。新流水线的学生可见内容只有 Kimi 原样写出的 question；出题素材、参考答案、审核结论只保存在内部工件中。
 
+Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；它只要求写科学问题与内部参考答案。Qwen 端没有统一的“仔细思考、写出推理过程”指令，也没有把题目改写成固定小问。
+
 流程：从已清洗的 SciCodePile 本地快照抽样素材 → Kimi 自由写题与内部参考答案 → 基座 Qwen 对题面随机采样多条原生 thinking/answer → Kimi 对每条结果做一次综合审核 → 输出原生 trace、SFT 候选和训练视图。
 
 ## yicloud 上的小规模命令
