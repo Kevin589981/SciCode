@@ -387,6 +387,15 @@ def main() -> None:
     prepare.add_argument("--seeds-per-repository", type=int, default=3)
     prepare.add_argument("--master-seed", type=int, default=1)
 
+    author = commands.add_parser("author-smoke")
+    author.add_argument("--seeds", type=Path, required=True)
+    author.add_argument("--index", type=int, default=0)
+    author.add_argument("--out", type=Path, required=True)
+    author.add_argument("--model", default="Kimi-K3")
+    author.add_argument("--master-seed", type=int, default=1)
+    author.add_argument("--max-tokens", type=int, default=16384)
+    author.add_argument("--timeout", type=int, default=2400)
+
     enqueue = commands.add_parser("enqueue")
     enqueue.add_argument("--db", type=Path, required=True)
     enqueue.add_argument("--seeds", type=Path, required=True)
@@ -426,6 +435,18 @@ def main() -> None:
             seeds_per_repository=args.seeds_per_repository,
             master_seed=args.master_seed,
         )
+    elif args.command == "author-smoke":
+        seed = read_jsonl(args.seeds)[args.index]
+        sample = sample_parameters(seed["seed_id"], 0, args.master_seed)
+        task = compose_task(
+            seed, model=args.model, **_role_endpoint("kimi"),
+            temperature=sample["temperature"], top_p=sample["top_p"],
+            request_seed=None, prompt_variant=sample["request_seed"] % 3,
+            max_tokens=args.max_tokens, timeout=args.timeout,
+        )
+        atomic_json(args.out, task)
+        result = {"task_id": task["task_id"], "question": task["question"],
+                  "output": str(args.out)}
     elif args.command == "enqueue":
         result = enqueue_seeds(
             WorkQueue(args.db), args.seeds, args.recipe, make_recipe(args)

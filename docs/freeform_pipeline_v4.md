@@ -19,6 +19,10 @@
       --out .cache/freeform-v4-smoke/seeds.jsonl \
       --repository-limit 3 --seeds-per-repository 1 --master-seed 2026
 
+    "$PY" -m factory.reasoning.freeform_batch author-smoke \
+      --seeds .cache/freeform-v4-smoke/seeds.jsonl --index 0 \
+      --out .cache/freeform-v4-smoke/author-task.json --master-seed 2026
+
     "$PY" -m factory.reasoning.freeform_batch enqueue \
       --db .cache/freeform-v4-smoke/queue.sqlite \
       --seeds .cache/freeform-v4-smoke/seeds.jsonl \
