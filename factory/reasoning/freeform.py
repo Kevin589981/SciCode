@@ -1,4 +1,4 @@
-"""Free-form scientific questions and Qwen-native thinking traces.
+"""Free-form scientific coding tasks and Qwen-native thinking traces.
 
 This is a separate v4 artifact path. The fixed-archetype v1 pipeline and its
 historical JSONL remain readable and unchanged.
@@ -16,16 +16,16 @@ from ..author import llm
 from .author import _json_objects
 from .schema import canonical_hash
 
-TASK_SCHEMA = "scicode-freeform-task-v1"
+TASK_SCHEMA = "scicode-freeform-coding-task-v1"
 TRACE_SCHEMA = "scicode-qwen-native-trace-v1"
-AUDIT_SCHEMA = "scicode-freeform-audit-v1"
-AUDIT_POLICY = "scientific-overall-v4"
-SFT_SCHEMA = "scicode-qwen-native-sft-v1"
-AUTHOR_PROMPT_POLICY = "freeform-open-v2"
+AUDIT_SCHEMA = "scicode-freeform-coding-audit-v1"
+AUDIT_POLICY = "scientific-coding-overall-v1"
+SFT_SCHEMA = "scicode-qwen-native-coding-sft-v1"
+AUTHOR_PROMPT_POLICY = "freeform-scientific-coding-v1"
 AUTHOR_OPENERS = (
-    "从下面的科学代码出发，写一个你认为有价值的科学问题。",
-    "下面是真实项目的源码。你会提出什么科学问题？",
-    "What scientific question would you ask after reading this source?",
+    "从下面的科学代码出发，写一道值得动手解决的科学编程题。",
+    "阅读这段真实项目源码后，提出一个需要科学推理并产出代码的问题。",
+    "What scientific programming problem would you pose from this source?",
 )
 
 
@@ -64,7 +64,9 @@ def author_messages(seed: dict, prompt_variant: int = 0) -> list[dict]:
     opener = AUTHOR_OPENERS[prompt_variant % len(AUTHOR_OPENERS)]
     prompt = (
         opener
-        + "\n同时写一份仅供内部核查的参考答案。"
+        + "\n题面自然写清必要的科学背景、要解决的科学或数值问题与代码交付物；"
+        "具体问题、解法和代码形式由你决定。"
+        "同时写一份含相应代码、仅供内部核查的参考答案。"
         "返回 JSON 对象，包含 question 和 reference_answer 两个字符串字段。\n\n"
         "素材：\n" + json.dumps(context, ensure_ascii=False)
     )
@@ -235,9 +237,13 @@ def audit_messages(task: dict, trace: dict) -> list[dict]:
         "若存在差异，请区分等价改写、未被题面排除的合理变体，"
         "以及改变题面指定对象或机制的实质性错误；不能因其他部分正确就忽略后者。"
         "实质性错误判 reject，证据不足判 uncertain，其余判 accept。"
-        "只返回 JSON 对象，字段为 key_check、verdict、reason；"
+        "还须判断题面是否自含解题所需信息、是否从素材引出需要编写代码的科学任务，"
+        "以及 Qwen 最终回答是否给出了实际完成该任务的代码。"
+        "允许不同编程语言、实现方法和呈现形式；只有概念解释或伪代码不算代码交付。"
+        "这项判断写入 coding_verdict，取 accept、reject 或 uncertain。"
+        "只返回 JSON 对象，字段为 key_check、coding_verdict、verdict、reason；"
         "key_check 简要写出题面关键关系与回答对应关系的对照及最重要的差异，"
-        "verdict 必须严格是 accept、reject 或 uncertain 之一。"
+        "verdict 判断科学正确性；verdict 与 coding_verdict 均须严格取 accept、reject 或 uncertain。"
         "\n\n原始科学素材：\n" + str(task["source"].get("excerpt") or "")
         + "\n\n内部参考答案（仅供核查）：\n" + task["reference_answer"]
         + "\n\nQwen 推理：\n" + trace["reasoning_content"]
@@ -273,7 +279,7 @@ def audit_trace(
     _choice, message = _message(response)
     try:
         spec, response_field = _result_object(
-            message, {"key_check", "verdict", "reason"}
+            message, {"key_check", "coding_verdict", "verdict", "reason"}
         )
     except FreeformError as exc:
         spec, response_field = {}, "invalid"
@@ -281,13 +287,17 @@ def audit_trace(
     else:
         parse_error = ""
     verdict = spec.get("verdict")
+    coding_verdict = spec.get("coding_verdict")
     reason = spec.get("reason")
     key_check = spec.get("key_check")
     if (not isinstance(verdict, str)
             or verdict not in {"accept", "reject", "uncertain"}
+            or not isinstance(coding_verdict, str)
+            or coding_verdict not in {"accept", "reject", "uncertain"}
             or not isinstance(reason, str) or not reason.strip()
             or not isinstance(key_check, str) or not key_check.strip()):
         verdict = "uncertain"
+        coding_verdict = "uncertain"
         reason = "审核输出格式无效，已隔离；" + (
             parse_error or f"原始判定={str(spec.get('verdict'))[:120]!r}"
         )
@@ -301,6 +311,7 @@ def audit_trace(
         "trace_id": trace["trace_id"],
         "task_id": task["task_id"],
         "verdict": verdict,
+        "coding_verdict": coding_verdict,
         "reason": reason,
         "key_check": key_check,
         "model": model,
@@ -319,6 +330,7 @@ def training_row(task: dict, trace: dict, audit: dict) -> dict | None:
             or audit.get("policy_version") != AUDIT_POLICY):
         raise FreeformError("task, native trace and audit are inconsistent")
     if (audit.get("verdict") != "accept"
+            or audit.get("coding_verdict") != "accept"
             or trace.get("finish_reason") != "stop"
             or not trace.get("reasoning_content", "").strip()
             or not trace.get("content", "").strip()):
@@ -342,6 +354,7 @@ def training_row(task: dict, trace: dict, audit: dict) -> dict | None:
         "thinking_format": "separate_reasoning_content",
         "audit": {
             "verdict": audit["verdict"],
+            "coding_verdict": audit["coding_verdict"],
             "reason": audit["reason"],
             "key_check": audit.get("key_check", ""),
             "model": audit["model"],
@@ -385,6 +398,7 @@ def training_projection(row: dict) -> dict:
             "task_hash": row["task_hash"],
             "trace_id": row["trace_id"],
             "audit_id": row["audit"]["audit_id"],
+            "coding_verdict": row["audit"]["coding_verdict"],
             "solver_model": row["provenance"]["solver_model"],
         },
     }

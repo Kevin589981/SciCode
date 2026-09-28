@@ -1,9 +1,27 @@
 # SciCode Reasoning-Trace Factory — Project State
 
-Last updated: 2026-09-21
+Last updated: 2026-09-28
 
 This file is the durable source of truth for project goals, decisions, progress,
 and constraints. Update it whenever a design decision or milestone changes.
+
+## Current workstream: freeform scientific coding and Qwen self-distillation
+
+The active development worktree is `D:/1/desktop/scienceIDE/SciCode-diverse-self-distill`
+on `scicode-diverse-self-distill-v4`, mirrored at
+`/root/ScienceIDE-workspace/SciCode-diverse-self-distill`. The older v1 state
+below is historical, not the current run configuration.
+
+The SFT target is a complete SciCode-relevant scientific programming problem
+and a Qwen-native trace containing both reasoning and a code-bearing final
+solution. Kimi authors and audits tasks; it is not the default CoT writer.
+Conceptual scientific QA without a task-specific code deliverable is not a
+valid training sample for this workstream. The author prompt stays open and
+short; the single scientific audit also checks whether the problem truly asks
+for code grounded in the sampled source and the final answer supplies relevant
+code. No fixed archetype, language, code fence, test-pass or length threshold
+defines acceptance. Raw questions, traces and audits remain available even
+when not exported to SFT. Historical datasets and pipelines are unchanged.
 
 ## Objective
 

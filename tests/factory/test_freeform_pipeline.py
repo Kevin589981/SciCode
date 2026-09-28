@@ -9,6 +9,7 @@ from factory.reasoning.freeform import (
     AUDIT_SCHEMA,
     SFT_SCHEMA,
     TASK_SCHEMA,
+    author_messages,
     audit_trace,
     collect_trace,
     compose_task,
@@ -18,6 +19,7 @@ from factory.reasoning.freeform import (
     training_row,
 )
 from factory.reasoning.freeform_batch import (
+    RECIPE_SCHEMA,
     aggregate,
     enqueue_seeds,
     prepare_seeds,
@@ -38,7 +40,11 @@ SEED = {
         "excerpt": "def equilibrium(x): return x * x",
     },
 }
-QUESTION = "在这个模型中，观测值加倍后平衡量将如何变化？说明适用条件。"
+QUESTION = (
+    "一个简化的无量纲平衡模型为 E(x)=x²，其中 x 为非负浓度。"
+    "推导浓度按因子 f 缩放时 E 的变化，并用任一编程语言实现"
+    "计算缩放后平衡量的函数，说明输入条件。"
+)
 
 
 def response(content, reasoning="", finish="stop"):
@@ -60,25 +66,41 @@ def fake_chat(messages, **kwargs):
     if model == "kimi-author":
         return response(json.dumps({
             "question": QUESTION,
-            "reference_answer": "平方关系成立时，平衡量变为四倍。",
+            "reference_answer": (
+                "E(fx)=f²E(x)。Python 实现：\n"
+                "def scaled_equilibrium(x, f):\n    return (f * x) ** 2"
+            ),
         }, ensure_ascii=False))
     if model == "qwen-base":
         if messages != [{"role": "user", "content": QUESTION}]:
             raise AssertionError("Qwen received an altered question")
         return response(
-            "若模型确为平方关系且其他条件不变，平衡量变为四倍。",
-            reasoning="设平衡量为 x 的平方。输入变为 2x，则输出为 4x²。",
+            "E(fx)=f²E(x)，要求 x、f 非负。\n\n"
+            "```python\ndef scaled_equilibrium(x, f):\n"
+            "    return (f * x) ** 2\n```",
+            reasoning="由 E(x)=x²，得 E(fx)=(fx)²=f²E(x)。函数直接计算缩放后的浓度平方。",
         )
     if model == "kimi-audit":
         return response(json.dumps({
-            "key_check": "题面给定平方关系；回答在条件不变时据此推得四倍。",
+            "key_check": "题面给定 E(x)=x²；回答推得 E(fx)=f²E(x)。",
+            "coding_verdict": "accept",
             "verdict": "accept",
-            "reason": "推理与平方关系一致，限定条件也写明。",
+            "reason": "推导正确，最终代码实现了缩放后的平衡量。",
         }, ensure_ascii=False))
     raise AssertionError(model)
 
 
 class FreeformPipelineTests(unittest.TestCase):
+    def test_author_asks_for_scientific_coding_without_fixed_archetype(self):
+        prompts = [author_messages(SEED, variant)[0]["content"]
+                   for variant in range(3)]
+        self.assertEqual(len(set(prompts)), 3)
+        for prompt in prompts:
+            self.assertIn("代码交付", prompt)
+            self.assertIn("内部核查", prompt)
+            self.assertIn(SEED["source"]["excerpt"], prompt)
+            self.assertNotIn("archetype_payload", prompt)
+
     def test_qwen_gets_only_authored_question_and_native_thinking(self):
         task = compose_task(
             SEED, chat_fn=fake_chat, model="kimi-author",
@@ -97,7 +119,7 @@ class FreeformPipelineTests(unittest.TestCase):
             send_seed=False, max_tokens=1000, timeout=20,
         )
         self.assertEqual(trace["reasoning_content"],
-                         "设平衡量为 x 的平方。输入变为 2x，则输出为 4x²。")
+                         "由 E(x)=x²，得 E(fx)=(fx)²=f²E(x)。函数直接计算缩放后的浓度平方。")
         self.assertEqual(trace["prompt"], qwen_messages(task))
         audit = audit_trace(
             task, trace, chat_fn=fake_chat, model="kimi-audit",
@@ -106,15 +128,79 @@ class FreeformPipelineTests(unittest.TestCase):
         )
         self.assertEqual(audit["schema_version"], AUDIT_SCHEMA)
         self.assertEqual(audit["policy_version"], AUDIT_POLICY)
+        self.assertEqual(audit["coding_verdict"], "accept")
         row = training_row(task, trace, audit)
         self.assertEqual(row["schema_version"], SFT_SCHEMA)
         self.assertEqual(row["audit"]["key_check"], audit["key_check"])
+        self.assertEqual(row["audit"]["coding_verdict"], "accept")
         self.assertEqual(row["messages"][1]["reasoning_content"],
                          trace["reasoning_content"])
         projected = training_projection(row)
         self.assertEqual(projected["messages"][0]["content"], QUESTION)
-        self.assertIn("<think>\n设平衡量", projected["messages"][1]["content"])
+        self.assertIn("<think>\n由 E(x)", projected["messages"][1]["content"])
         self.assertTrue(projected["messages"][1]["content"].endswith(trace["content"]))
+        self.assertEqual(projected["metadata"]["coding_verdict"], "accept")
+
+    def test_conceptual_qa_is_not_exported_even_if_scientifically_correct(self):
+        def conceptual_author(messages, **kwargs):
+            return response(json.dumps({
+                "question": "为什么平方律下浓度加倍会使平衡量变为四倍？",
+                "reference_answer": "因为 (2x)²=4x²。",
+            }, ensure_ascii=False))
+
+        task = compose_task(
+            SEED, chat_fn=conceptual_author, model="kimi-author",
+            base_url="http://kimi/v1", api_key="dummy",
+            temperature=0.9, top_p=0.95, request_seed=None,
+            max_tokens=1000, timeout=20,
+        )
+        trace = collect_trace(
+            task, attempt=0, sample=sample_parameters(task["task_id"], 0, 1),
+            chat_fn=lambda messages, **kwargs: response(
+                "因为 (2x)²=4x²。", reasoning="由平方律直接推导。"),
+            model="qwen-base", base_url="http://qwen/v1", api_key="dummy",
+            send_seed=False, max_tokens=1000, timeout=20,
+        )
+
+        def conceptual_audit(messages, **kwargs):
+            return response(json.dumps({
+                "key_check": "平方律推导正确。",
+                "coding_verdict": "reject",
+                "verdict": "accept",
+                "reason": "科学解释正确，但题目未要求代码，答案也没有代码。",
+            }, ensure_ascii=False))
+
+        audit = audit_trace(
+            task, trace, chat_fn=conceptual_audit, model="kimi-audit",
+            base_url="http://kimi/v1", api_key="dummy",
+            max_tokens=1000, timeout=20,
+        )
+        self.assertEqual(audit["verdict"], "accept")
+        self.assertEqual(audit["coding_verdict"], "reject")
+        self.assertIsNone(training_row(task, trace, audit))
+
+    def test_non_python_code_can_be_exported(self):
+        task = compose_task(
+            SEED, chat_fn=fake_chat, model="kimi-author",
+            base_url="http://kimi/v1", api_key="dummy",
+            temperature=0.9, top_p=0.95, request_seed=None,
+            max_tokens=1000, timeout=20,
+        )
+        answer = "E(fx)=f²E(x)。\n```julia\nscaled_equilibrium(x, f) = (f*x)^2\n```"
+        trace = collect_trace(
+            task, attempt=0, sample=sample_parameters(task["task_id"], 0, 1),
+            chat_fn=lambda messages, **kwargs: response(
+                answer, reasoning="将 f 乘入 x 后按平方律计算。"),
+            model="qwen-base", base_url="http://qwen/v1", api_key="dummy",
+            send_seed=False, max_tokens=1000, timeout=20,
+        )
+        audit = audit_trace(
+            task, trace, chat_fn=fake_chat, model="kimi-audit",
+            base_url="http://kimi/v1", api_key="dummy",
+            max_tokens=1000, timeout=20,
+        )
+        self.assertEqual(training_row(task, trace, audit)["messages"][1]["content"],
+                         answer)
 
     def test_raw_incomplete_trace_is_kept_but_not_exported(self):
         task = compose_task(
@@ -158,6 +244,7 @@ class FreeformPipelineTests(unittest.TestCase):
         def invalid_review(messages, **kwargs):
             return response(json.dumps({
                 "key_check": "已核对题目与回答。",
+                "coding_verdict": "accept",
                 "verdict": "mostly_accept",
                 "reason": "判定值不在协议内。",
             }, ensure_ascii=False))
@@ -169,6 +256,36 @@ class FreeformPipelineTests(unittest.TestCase):
         )
         self.assertEqual(audit["verdict"], "uncertain")
         self.assertIn("mostly_accept", audit["reason"])
+        self.assertIsNone(training_row(task, trace, audit))
+
+    def test_missing_coding_verdict_is_quarantined(self):
+        task = compose_task(
+            SEED, chat_fn=fake_chat, model="kimi-author",
+            base_url="http://kimi/v1", api_key="dummy",
+            temperature=0.9, top_p=0.95, request_seed=None,
+            max_tokens=1000, timeout=20,
+        )
+        trace = collect_trace(
+            task, attempt=0, sample=sample_parameters(task["task_id"], 0, 1),
+            chat_fn=fake_chat, model="qwen-base",
+            base_url="http://qwen/v1", api_key="dummy",
+            send_seed=False, max_tokens=1000, timeout=20,
+        )
+
+        def old_format_review(messages, **kwargs):
+            return response(json.dumps({
+                "key_check": "科学关系正确。",
+                "verdict": "accept",
+                "reason": "旧版审核缺少编程判断。",
+            }, ensure_ascii=False))
+
+        audit = audit_trace(
+            task, trace, chat_fn=old_format_review, model="kimi-audit",
+            base_url="http://kimi/v1", api_key="dummy",
+            max_tokens=1000, timeout=20,
+        )
+        self.assertEqual(audit["verdict"], "uncertain")
+        self.assertEqual(audit["coding_verdict"], "uncertain")
         self.assertIsNone(training_row(task, trace, audit))
 
     def test_prepared_catalog_queue_resume_and_aggregate(self):
@@ -211,7 +328,7 @@ class FreeformPipelineTests(unittest.TestCase):
                 "model.py",
             )
             recipe = {
-                "schema_version": "scicode-freeform-recipe-v1",
+                "schema_version": RECIPE_SCHEMA,
                 "author_model": "kimi-author",
                 "solver_model": "qwen-base",
                 "audit_model": "kimi-audit",

@@ -1,10 +1,12 @@
-# SciCode 自由出题 / Qwen 原生 trace 流水线
+# SciCode 科学编程自由出题 / Qwen 原生 trace 流水线
 
-本分支的新流水线位于 factory/reasoning/freeform.py 与 freeform_batch.py。原有固定 archetype 流水线仍独立可用。新流水线的学生可见内容只有 Kimi 原样写出的 question；出题素材、参考答案、审核结论只保存在内部工件中。
+本分支的新流水线位于 factory/reasoning/freeform.py 与 freeform_batch.py。原有固定 archetype 流水线仍独立可用。新流水线的目标是从科学源码产生完整的科学编程题，再收集 Qwen 原生推理与针对该题的代码解答；不是把源码改写成概念问答。学生可见内容只有 Kimi 原样写出的 question；出题素材、参考答案、审核结论只保存在内部工件中。
 
-Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；它只要求写科学问题与内部参考答案。Qwen 端没有统一的“仔细思考、写出推理过程”指令，也没有把题目改写成固定小问。
+Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；它要求题目自然给出必要科学背景与代码交付要求，同时保存含代码的内部参考解答。题目类型、解法、语言和代码呈现方式不预设。Qwen 端没有统一的“仔细思考、写出推理过程”指令，也没有把题目改写成固定小问。
 
-流程：从已清洗的 SciCodePile 本地快照抽样素材 → Kimi 自由写题与内部参考答案 → 基座 Qwen 对题面随机采样多条原生 thinking/answer → Kimi 对每条结果做一次综合审核 → 输出原生 trace、SFT 候选和训练视图。
+流程：从已清洗的 SciCodePile 本地快照抽样素材 → Kimi 自由写科学编程题与内部参考解答 → 基座 Qwen 对题面随机采样多条原生 thinking/含代码的 answer → Kimi 对每条结果做一次综合审核 → 输出原生 trace、SFT 候选和训练视图。
+
+同一次 Kimi 审核保留原有科学正确性判断，并额外判断题目是否确实从素材引出编程任务、最终代码是否回应题目。两项均通过才进入 SFT 候选。这里只检查实质交付，不用固定题型、字数、Python `def` 或 Markdown 代码围栏作硬门槛；不以运行成功代替科学性判断。旧的自由问答工件与新任务、审核、SFT 使用不同 schema/policy/job kind，新运行须使用新的数据库和输出目录。
 
 ## yicloud 上的小规模命令
 
@@ -18,39 +20,39 @@ Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；
 
     "$PY" -m factory.reasoning.freeform_batch prepare \
       --catalog /root/ScienceIDE-workspace/SciCode/.cache/scicodepile/catalog-10k.jsonl \
-      --out .cache/freeform-v4-smoke/seeds.jsonl \
+      --out .cache/freeform-coding-smoke/seeds.jsonl \
       --repository-limit 3 --seeds-per-repository 1 --master-seed 2026
 
     "$PY" -m factory.reasoning.freeform_batch author-smoke \
-      --seeds .cache/freeform-v4-smoke/seeds.jsonl --index 0 \
-      --out .cache/freeform-v4-smoke/author-task.json --master-seed 2026
+      --seeds .cache/freeform-coding-smoke/seeds.jsonl --index 0 \
+      --out .cache/freeform-coding-smoke/author-task.json --master-seed 2026
 
     "$PY" -m factory.reasoning.freeform_batch trace-smoke \
-      --task .cache/freeform-v4-smoke/author-task.json \
-      --out .cache/freeform-v4-smoke/trace-check \
+      --task .cache/freeform-coding-smoke/author-task.json \
+      --out .cache/freeform-coding-smoke/trace-check \
       --solver-model BASE_QWEN_MODEL_NAME --attempts 2 --master-seed 2026
 
     "$PY" -m factory.reasoning.freeform_batch enqueue \
-      --db .cache/freeform-v4-smoke/queue.sqlite \
-      --seeds .cache/freeform-v4-smoke/seeds.jsonl \
-      --recipe .cache/freeform-v4-smoke/recipe.json \
+      --db .cache/freeform-coding-smoke/queue.sqlite \
+      --seeds .cache/freeform-coding-smoke/seeds.jsonl \
+      --recipe .cache/freeform-coding-smoke/recipe.json \
       --author-model Kimi-K3 --solver-model BASE_QWEN_MODEL_NAME \
       --audit-model Kimi-K3 --attempts 2 \
       --author-max-tokens 16384 --solver-max-tokens 131072
 
     "$PY" -m factory.reasoning.freeform_batch run \
-      --db .cache/freeform-v4-smoke/queue.sqlite \
-      --recipe .cache/freeform-v4-smoke/recipe.json \
-      --output-root .cache/freeform-v4-smoke/output \
+      --db .cache/freeform-coding-smoke/queue.sqlite \
+      --recipe .cache/freeform-coding-smoke/recipe.json \
+      --output-root .cache/freeform-coding-smoke/output \
       --workers 3 --kimi-slots 2 --qwen-slots 2
 
     "$PY" -m factory.reasoning.freeform_batch status \
-      --db .cache/freeform-v4-smoke/queue.sqlite
+      --db .cache/freeform-coding-smoke/queue.sqlite
 
     "$PY" -m factory.reasoning.freeform_batch aggregate \
-      --db .cache/freeform-v4-smoke/queue.sqlite \
-      --out .cache/freeform-v4-smoke/native-sft.jsonl \
-      --train-out .cache/freeform-v4-smoke/train.jsonl
+      --db .cache/freeform-coding-smoke/queue.sqlite \
+      --out .cache/freeform-coding-smoke/native-sft.jsonl \
+      --train-out .cache/freeform-coding-smoke/train.jsonl
 
 如服务支持请求级 seed，可在 enqueue 时加入 --send-seed。即使未发送 seed，非零 temperature、随机 top_p 和独立请求也会用于采样；实际输出是否出现有效变化应在 smoke 里检查。recipe 固定每次采样参数，任务重试可复现。要改变 recipe，使用新数据库与输出目录。
 
@@ -62,9 +64,9 @@ Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；
 - shards/<job_id>/task.json：Kimi 写出的 question 和内部参考答案。
 - shards/<job_id>/trace-N.json：Qwen 实际收到的唯一 user 消息、原生 reasoning_content、final content、采样参数、响应原文及终止信息。
 - shards/<job_id>/audit-N-<policy_version>.json：单次 Kimi 综合审核及简要依据。
-- shards/<job_id>/sft.jsonl：仅含格式完整、科学审核通过且 Qwen 原生 thinking 与最终答案均存在的候选。
+- shards/<job_id>/sft.jsonl：仅含格式完整、科学审核与编程交付均通过且 Qwen 原生 thinking 与含代码的最终答案均存在的候选。
 - native-sft.jsonl：跨 shard 的审计友好原生格式；train.jsonl：将同一条 Qwen 原生 thinking 确定性映射为 think 标签内容，供只读取 message.content 的训练模板使用。
 
-所有原始响应保留在 shard 中。审核只影响 SFT 候选，不改写 Kimi 题面或 Qwen 的思维链。批量运行可用更多 worker，但 Kimi/Qwen 并发槽分别设置，并首先用少量真实样本检查题干、随机采样差异和训练模板读取结果。
+所有原始响应保留在 shard 中。审核只影响 SFT 候选，不改写 Kimi 题面或 Qwen 的思维链。批量运行可用更多 worker，但 Kimi/Qwen 并发槽分别设置，并首先用少量真实样本检查题目是否要求实际代码、代码是否回应素材与题目、随机采样差异和训练模板读取结果。
 
-审核文件实际名称包含 policy_version，例如 audit-0-scientific-overall-v2.json。审核提示词更新时可在同一目录留下旧判定并另存新版判定，方便比较校准；题目与 Qwen trace 保持原样。
+审核文件实际名称包含 policy_version，例如 audit-0-scientific-coding-overall-v1.json。审核提示词更新时可在同一目录留下旧判定并另存新版判定，方便比较校准；题目与 Qwen trace 保持原样。

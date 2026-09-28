@@ -1,6 +1,6 @@
 # SciCode 自由出题与 Qwen 原生 trace：修订实施计划（待审核）
 
-状态：供用户审核。当前只修改本计划，不启动生产、训练或测评。分支 scicode-diverse-self-distill-v4 从 9fd494f7 创建，旧分支与旧数据保留。
+状态：历史计划。其后发现“科学问题”被实现成了纯概念问答，与 SciCode 科学编程 SFT 目标不符；当前实现与运行说明以 ../freeform_pipeline_v4.md 为准。分支 scicode-diverse-self-distill-v4 从 9fd494f7 创建，旧分支与旧数据保留。
 
 ## 目标与这次纠偏
 
