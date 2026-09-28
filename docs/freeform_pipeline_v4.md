@@ -59,8 +59,10 @@
 - seeds.jsonl：已清洗素材的抽样，含数据集快照哈希、文件、源码摘录。
 - shards/<job_id>/task.json：Kimi 写出的 question 和内部参考答案。
 - shards/<job_id>/trace-N.json：Qwen 实际收到的唯一 user 消息、原生 reasoning_content、final content、采样参数、响应原文及终止信息。
-- shards/<job_id>/audit-N.json：单次 Kimi 综合审核及简要依据。
+- shards/<job_id>/audit-N-<policy_version>.json：单次 Kimi 综合审核及简要依据。
 - shards/<job_id>/sft.jsonl：仅含格式完整、科学审核通过且 Qwen 原生 thinking 与最终答案均存在的候选。
 - native-sft.jsonl：跨 shard 的审计友好原生格式；train.jsonl：将同一条 Qwen 原生 thinking 确定性映射为 think 标签内容，供只读取 message.content 的训练模板使用。
 
 所有原始响应保留在 shard 中。审核只影响 SFT 候选，不改写 Kimi 题面或 Qwen 的思维链。批量运行可用更多 worker，但 Kimi/Qwen 并发槽分别设置，并首先用少量真实样本检查题干、随机采样差异和训练模板读取结果。
+
+审核文件实际名称包含 policy_version，例如 audit-0-scientific-overall-v2.json。审核提示词更新时可在同一目录留下旧判定并另存新版判定，方便比较校准；题目与 Qwen trace 保持原样。

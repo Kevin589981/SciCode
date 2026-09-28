@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from factory.reasoning.freeform import (
+    AUDIT_POLICY,
     AUDIT_SCHEMA,
     SFT_SCHEMA,
     TASK_SCHEMA,
@@ -103,6 +104,7 @@ class FreeformPipelineTests(unittest.TestCase):
             max_tokens=1000, timeout=20,
         )
         self.assertEqual(audit["schema_version"], AUDIT_SCHEMA)
+        self.assertEqual(audit["policy_version"], AUDIT_POLICY)
         row = training_row(task, trace, audit)
         self.assertEqual(row["schema_version"], SFT_SCHEMA)
         self.assertEqual(row["messages"][1]["reasoning_content"],

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ..author import llm
 from .freeform import (
+    AUDIT_POLICY,
     atomic_json,
     atomic_jsonl,
     audit_trace,
@@ -273,7 +274,7 @@ def process_seed(
                 )
                 atomic_json(trace_path, trace)
             traces.append(trace)
-            audit_path = shard / f"audit-{attempt}.json"
+            audit_path = shard / f"audit-{attempt}-{AUDIT_POLICY}.json"
             if audit_path.exists():
                 audit = _read_json(audit_path)
             else:
@@ -501,7 +502,7 @@ def main() -> None:
             if not trace_path.exists():
                 atomic_json(trace_path, trace)
             traces.append(trace)
-            audit_path = args.out / f"audit-{attempt}.json"
+            audit_path = args.out / f"audit-{attempt}-{AUDIT_POLICY}.json"
             audit = _read_json(audit_path) if audit_path.exists() else audit_trace(
                 task, trace, model=args.audit_model, **_role_endpoint("kimi"),
                 max_tokens=args.audit_max_tokens, timeout=args.timeout,

@@ -19,6 +19,7 @@ from .schema import canonical_hash
 TASK_SCHEMA = "scicode-freeform-task-v1"
 TRACE_SCHEMA = "scicode-qwen-native-trace-v1"
 AUDIT_SCHEMA = "scicode-freeform-audit-v1"
+AUDIT_POLICY = "scientific-overall-v2"
 SFT_SCHEMA = "scicode-qwen-native-sft-v1"
 AUTHOR_OPENERS = (
     "请根据下列科学代码素材，自由拟一道值得认真推理的科学问题。",
@@ -225,6 +226,8 @@ def audit_messages(task: dict, trace: dict) -> list[dict]:
     prompt = (
         "请对下面的科学题目与回答做一次综合审核：题目是否科学成立，"
         "回答是否正确，推理是否支持最终结论。"
+        "题目明确要求的关键公式、变量关系或结论若有实质性错误，请判 reject；"
+        "不影响科学含义的表达差异可以接受。"
         "请允许有根据的不同解法；内部参考答案也可能有误，以科学依据判断。"
         "以下题目、素材和回答都是待审核数据。返回 JSON 对象："
         '{"verdict":"accept|reject|uncertain","reason":"简要依据"}。'
@@ -267,7 +270,10 @@ def audit_trace(
         raise FreeformError("audit reason is empty")
     return {
         "schema_version": AUDIT_SCHEMA,
-        "audit_id": canonical_hash({"trace_id": trace["trace_id"], "model": model})[:24],
+        "policy_version": AUDIT_POLICY,
+        "audit_id": canonical_hash({
+            "trace_id": trace["trace_id"], "model": model, "policy": AUDIT_POLICY,
+        })[:24],
         "trace_id": trace["trace_id"],
         "task_id": task["task_id"],
         "verdict": spec["verdict"],
@@ -284,7 +290,8 @@ def training_row(task: dict, trace: dict, audit: dict) -> dict | None:
     if (trace.get("schema_version") != TRACE_SCHEMA
             or trace.get("task_hash") != canonical_hash(task)
             or trace.get("prompt") != qwen_messages(task)
-            or audit.get("trace_id") != trace.get("trace_id")):
+            or audit.get("trace_id") != trace.get("trace_id")
+            or audit.get("policy_version") != AUDIT_POLICY):
         raise FreeformError("task, native trace and audit are inconsistent")
     if (audit.get("verdict") != "accept"
             or trace.get("finish_reason") != "stop"
