@@ -52,6 +52,8 @@
 
 如服务支持请求级 seed，可在 enqueue 时加入 --send-seed。即使未发送 seed，非零 temperature、随机 top_p 和独立请求也会用于采样；实际输出是否出现有效变化应在 smoke 里检查。recipe 固定每次采样参数，任务重试可复现。要改变 recipe，使用新数据库与输出目录。
 
+批量运行可以给 run 增加 --kimi-metrics-url http://10.100.184.127:29000/metrics，并分别调高 --workers、--kimi-slots、--qwen-slots。Kimi 服务容量默认按 1792 计算，可用 --kimi-service-capacity 调整；当前活跃请求数与本地槽共同决定新请求数。Qwen 端先用独立的静态并发槽，按其实际服务容量设置。
+
 ## 工件与边界
 
 - seeds.jsonl：已清洗素材的抽样，含数据集快照哈希、文件、源码摘录。

@@ -23,7 +23,13 @@ from .freeform import (
     training_row,
     validate_task,
 )
-from .queue import LeaseHeartbeat, LocalSlotManager, ScheduledChat, WorkQueue
+from .queue import (
+    LeaseHeartbeat,
+    LocalSlotManager,
+    MetricsCapacityController,
+    ScheduledChat,
+    WorkQueue,
+)
 from .schema import canonical_hash
 
 JOB_KIND = "freeform_seed_v1"
@@ -207,13 +213,17 @@ def process_seed(
     worker: str,
     chat_fn=llm.chat,
     lease_seconds: float = 14_400,
+    kimi_capacity: MetricsCapacityController | None = None,
 ) -> dict:
     if lease.payload["recipe_hash"] != canonical_hash(recipe):
         raise ValueError("leased job belongs to a different recipe")
     seed = lease.payload["seed"]
     shard = output_root / "shards" / lease.job_id
     shard.mkdir(parents=True, exist_ok=True)
-    kimi = ScheduledChat(slots, chat_fn, worker=worker, resource="kimi")
+    kimi = ScheduledChat(
+        slots, chat_fn, worker=worker, resource="kimi",
+        capacity_controller=kimi_capacity,
+    )
     qwen = ScheduledChat(slots, chat_fn, worker=worker, resource="qwen")
     kimi_endpoint = _role_endpoint("kimi")
     qwen_endpoint = _role_endpoint("qwen")
@@ -306,12 +316,24 @@ def run_workers(
     kimi_slots: int,
     qwen_slots: int,
     chat_fn=llm.chat,
+    kimi_metrics_url: str | None = None,
+    kimi_min_slots: int = 1,
+    kimi_service_capacity: int = 1792,
 ) -> list[dict]:
     if min(workers, kimi_slots, qwen_slots) < 1:
         raise ValueError("workers and model slots must be positive")
+    if kimi_min_slots < 1 or kimi_min_slots > kimi_service_capacity:
+        raise ValueError("kimi_min_slots must be within service capacity")
     slots = LocalSlotManager()
     slots.configure_slots("kimi", kimi_slots)
     slots.configure_slots("qwen", qwen_slots)
+    kimi_capacity = (
+        MetricsCapacityController(
+            kimi_metrics_url,
+            minimum=kimi_min_slots,
+            maximum=kimi_service_capacity,
+        ) if kimi_metrics_url else None
+    )
     condition = threading.Condition()
     host = socket.gethostname()
 
@@ -336,6 +358,7 @@ def run_workers(
                     slots=slots,
                     worker=worker,
                     chat_fn=chat_fn,
+                    kimi_capacity=kimi_capacity,
                 )
             except Exception as exc:
                 with condition:
@@ -430,6 +453,9 @@ def main() -> None:
     run.add_argument("--workers", type=int, default=8)
     run.add_argument("--kimi-slots", type=int, default=8)
     run.add_argument("--qwen-slots", type=int, default=8)
+    run.add_argument("--kimi-metrics-url")
+    run.add_argument("--kimi-min-slots", type=int, default=1)
+    run.add_argument("--kimi-service-capacity", type=int, default=1792)
 
     status = commands.add_parser("status")
     status.add_argument("--db", type=Path, required=True)
@@ -509,6 +535,9 @@ def main() -> None:
             workers=args.workers,
             kimi_slots=args.kimi_slots,
             qwen_slots=args.qwen_slots,
+            kimi_metrics_url=args.kimi_metrics_url,
+            kimi_min_slots=args.kimi_min_slots,
+            kimi_service_capacity=args.kimi_service_capacity,
         )
         result = {"workers": workers, "queue": queue.counts()}
     elif args.command == "status":
