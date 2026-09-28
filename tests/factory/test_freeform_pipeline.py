@@ -153,6 +153,9 @@ class FreeformPipelineTests(unittest.TestCase):
                 "    return b\n",
                 encoding="utf-8",
             )
+            (snapshot / "thirdParty").mkdir()
+            (snapshot / "thirdParty" / "relicense.py").write_text(
+                "print('not science')\n", encoding="utf-8")
             (snapshot / ".scicodepile_snapshot.json").write_text(
                 json.dumps({"snapshot_hash": "sha-1"}), encoding="utf-8")
             catalog = root / "catalog.jsonl"
@@ -169,6 +172,10 @@ class FreeformPipelineTests(unittest.TestCase):
                 catalog, seeds, repository_limit=1,
                 seeds_per_repository=1, master_seed=3)
             self.assertEqual(report["seeds"], 1)
+            self.assertEqual(
+                json.loads(seeds.read_text(encoding="utf-8"))["source"]["file"],
+                "model.py",
+            )
             recipe = {
                 "schema_version": "scicode-freeform-recipe-v1",
                 "author_model": "kimi-author",
@@ -206,6 +213,36 @@ class FreeformPipelineTests(unittest.TestCase):
             self.assertEqual(native[0]["messages"][0]["content"], QUESTION)
             self.assertEqual(len((root / "train.jsonl").read_text(
                 encoding="utf-8").splitlines()), 2)
+
+    def test_cpp_source_can_seed_a_question(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            (snapshot / "solver.cpp").write_text(
+                "double energy(double mass, double velocity) {"
+                " return 0.5 * mass * velocity * velocity; }\n",
+                encoding="utf-8")
+            (snapshot / ".scicodepile_snapshot.json").write_text(
+                json.dumps({"snapshot_hash": "sha-cpp"}), encoding="utf-8")
+            catalog = root / "catalog.jsonl"
+            catalog.write_text(json.dumps({
+                "source_kind": "scicodepile_clean_dataset",
+                "repo_id": "scicodepile:example/cpp",
+                "full_name": "example/cpp",
+                "snapshot_path": str(snapshot),
+                "snapshot_hash": "sha-cpp",
+                "source_dataset": "test",
+            }) + "\n", encoding="utf-8")
+            seeds = root / "seeds.jsonl"
+            result = prepare_seeds(
+                catalog, seeds, repository_limit=1,
+                seeds_per_repository=1, master_seed=3)
+            self.assertEqual(result["seeds"], 1)
+            self.assertEqual(
+                json.loads(seeds.read_text(encoding="utf-8"))["source"]["file"],
+                "solver.cpp",
+            )
 
 
 if __name__ == "__main__":

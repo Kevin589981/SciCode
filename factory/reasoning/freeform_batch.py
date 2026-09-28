@@ -29,6 +29,11 @@ from .schema import canonical_hash
 JOB_KIND = "freeform_seed_v1"
 RECIPE_SCHEMA = "scicode-freeform-recipe-v1"
 SEED_SCHEMA = "scicode-freeform-seed-v1"
+SOURCE_SUFFIXES = {
+    ".py", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".f", ".f90",
+    ".f95", ".jl", ".m", ".r",
+}
+THIRD_PARTY_PARTS = {"thirdparty", "third_party", "vendor", "vendored", "_external"}
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -76,7 +81,16 @@ def prepare_seeds(
         snapshot = json.loads(metadata.read_text(encoding="utf-8"))
         if snapshot.get("snapshot_hash") != repo.get("snapshot_hash"):
             raise ValueError(f"snapshot hash mismatch: {root}")
-        files = sorted(root.rglob("*.py"))
+        files = sorted(
+            path for path in root.rglob("*")
+            if path.is_file()
+            and path.suffix.casefold() in SOURCE_SUFFIXES
+            and not any(
+                part.casefold() in THIRD_PARTY_PARTS
+                for part in path.relative_to(root).parts
+            )
+            and not path.stem.casefold().startswith(("license", "relicense"))
+        )
         rng.shuffle(files)
         selected = []
         for path in files:
