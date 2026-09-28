@@ -7,6 +7,7 @@ from unittest.mock import patch
 from factory.reasoning.freeform import (
     AUDIT_POLICY,
     AUDIT_SCHEMA,
+    FreeformError,
     SFT_SCHEMA,
     TASK_SCHEMA,
     author_messages,
@@ -17,6 +18,7 @@ from factory.reasoning.freeform import (
     sample_parameters,
     training_projection,
     training_row,
+    validate_task,
 )
 from factory.reasoning.freeform_batch import (
     RECIPE_SCHEMA,
@@ -287,6 +289,64 @@ class FreeformPipelineTests(unittest.TestCase):
         self.assertEqual(audit["verdict"], "uncertain")
         self.assertEqual(audit["coding_verdict"], "uncertain")
         self.assertIsNone(training_row(task, trace, audit))
+
+    def test_author_rejects_truncated_reasoning_draft(self):
+        draft = json.dumps({
+            "question": "题目：科学编程任务\n...",
+            "reference_answer": "参考代码：...",
+        }, ensure_ascii=False)
+
+        def truncated_author(messages, **kwargs):
+            return response("", reasoning=draft, finish="length")
+
+        with self.assertRaisesRegex(FreeformError, "did not finish"):
+            compose_task(
+                SEED, chat_fn=truncated_author, model="kimi-author",
+                base_url="http://kimi/v1", api_key="dummy",
+                temperature=0.9, top_p=0.95, request_seed=None,
+                max_tokens=1000, timeout=20,
+            )
+        task = compose_task(
+            SEED, chat_fn=fake_chat, model="kimi-author",
+            base_url="http://kimi/v1", api_key="dummy",
+            temperature=0.9, top_p=0.95, request_seed=None,
+            max_tokens=1000, timeout=20,
+        )
+        task["authoring"]["finish_reason"] = "length"
+        task["authoring"]["response_field"] = "reasoning_content"
+        with self.assertRaisesRegex(FreeformError, "complete author final answer"):
+            validate_task(task)
+
+    def test_audit_does_not_accept_json_drafts_or_truncated_output(self):
+        task = compose_task(
+            SEED, chat_fn=fake_chat, model="kimi-author",
+            base_url="http://kimi/v1", api_key="dummy",
+            temperature=0.9, top_p=0.95, request_seed=None,
+            max_tokens=1000, timeout=20,
+        )
+        trace = collect_trace(
+            task, attempt=0, sample=sample_parameters(task["task_id"], 0, 1),
+            chat_fn=fake_chat, model="qwen-base",
+            base_url="http://qwen/v1", api_key="dummy",
+            send_seed=False, max_tokens=1000, timeout=20,
+        )
+        verdict = json.dumps({
+            "key_check": "正确。", "coding_verdict": "accept",
+            "verdict": "accept", "reason": "科学与代码都正确。",
+        }, ensure_ascii=False)
+        for content, reasoning, finish in (("", verdict, "stop"),
+                                           (verdict, "", "length")):
+            with self.subTest(finish=finish, content=bool(content)):
+                audit = audit_trace(
+                    task, trace,
+                    chat_fn=lambda messages, **kwargs: response(
+                        content, reasoning=reasoning, finish=finish),
+                    model="kimi-audit", base_url="http://kimi/v1",
+                    api_key="dummy", max_tokens=1000, timeout=20,
+                )
+                self.assertEqual(audit["verdict"], "uncertain")
+                self.assertEqual(audit["coding_verdict"], "uncertain")
+                self.assertIsNone(training_row(task, trace, audit))
 
     def test_prepared_catalog_queue_resume_and_aggregate(self):
         with tempfile.TemporaryDirectory() as directory:

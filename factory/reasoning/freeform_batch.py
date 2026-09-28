@@ -417,7 +417,7 @@ def main() -> None:
     author.add_argument("--out", type=Path, required=True)
     author.add_argument("--model", default="Kimi-K3")
     author.add_argument("--master-seed", type=int, default=1)
-    author.add_argument("--max-tokens", type=int, default=16384)
+    author.add_argument("--max-tokens", type=int, default=65535)
     author.add_argument("--timeout", type=int, default=2400)
 
     trace_smoke = commands.add_parser("trace-smoke")
@@ -428,7 +428,7 @@ def main() -> None:
     trace_smoke.add_argument("--attempts", type=int, default=2)
     trace_smoke.add_argument("--master-seed", type=int, default=1)
     trace_smoke.add_argument("--solver-max-tokens", type=int, default=32768)
-    trace_smoke.add_argument("--audit-max-tokens", type=int, default=8192)
+    trace_smoke.add_argument("--audit-max-tokens", type=int, default=32768)
     trace_smoke.add_argument("--timeout", type=int, default=2400)
     trace_smoke.add_argument("--send-seed", action="store_true")
 
@@ -441,9 +441,9 @@ def main() -> None:
     enqueue.add_argument("--audit-model", required=True)
     enqueue.add_argument("--attempts", type=int, default=2)
     enqueue.add_argument("--master-seed", type=int, default=1)
-    enqueue.add_argument("--author-max-tokens", type=int, default=16384)
+    enqueue.add_argument("--author-max-tokens", type=int, default=65535)
     enqueue.add_argument("--solver-max-tokens", type=int, default=131072)
-    enqueue.add_argument("--audit-max-tokens", type=int, default=8192)
+    enqueue.add_argument("--audit-max-tokens", type=int, default=32768)
     enqueue.add_argument("--timeout", type=int, default=2400)
     enqueue.add_argument("--send-seed", action="store_true")
 

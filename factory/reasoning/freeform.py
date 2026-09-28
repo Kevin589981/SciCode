@@ -19,7 +19,7 @@ from .schema import canonical_hash
 TASK_SCHEMA = "scicode-freeform-coding-task-v1"
 TRACE_SCHEMA = "scicode-qwen-native-trace-v1"
 AUDIT_SCHEMA = "scicode-freeform-coding-audit-v1"
-AUDIT_POLICY = "scientific-coding-overall-v1"
+AUDIT_POLICY = "scientific-coding-overall-v2"
 SFT_SCHEMA = "scicode-qwen-native-coding-sft-v1"
 AUTHOR_PROMPT_POLICY = "freeform-scientific-coding-v1"
 AUTHOR_OPENERS = (
@@ -45,7 +45,9 @@ def _message(response: dict) -> tuple[dict, dict]:
 
 
 def _result_object(message: dict, required: set[str]) -> tuple[dict, str]:
-    for field in ("content", "reasoning_content"):
+    # Reasoning may contain provisional JSON, including incomplete drafts.
+    # Only the model's final answer can be used as an artifact.
+    for field in ("content",):
         for value in _json_objects(message.get(field) or ""):
             if required <= value.keys():
                 return value, field
@@ -100,6 +102,10 @@ def compose_task(
         timeout=timeout,
     )
     choice, message = _message(response)
+    if choice.get("finish_reason") != "stop":
+        raise FreeformError(
+            f"author response did not finish: {choice.get('finish_reason')!r}"
+        )
     spec, response_field = _result_object(message, {"question", "reference_answer"})
     question = spec["question"]
     reference = spec["reference_answer"]
@@ -142,6 +148,11 @@ def validate_task(task: dict) -> dict:
             raise FreeformError(f"task.{key} must be a nonempty string")
     if not isinstance(task.get("source"), dict):
         raise FreeformError("task.source must be an object")
+    authoring = task.get("authoring")
+    if (not isinstance(authoring, dict)
+            or authoring.get("finish_reason") != "stop"
+            or authoring.get("response_field") != "content"):
+        raise FreeformError("task must come from a complete author final answer")
     return task
 
 
@@ -276,16 +287,20 @@ def audit_trace(
         max_tokens=max_tokens,
         timeout=timeout,
     )
-    _choice, message = _message(response)
-    try:
-        spec, response_field = _result_object(
-            message, {"key_check", "coding_verdict", "verdict", "reason"}
-        )
-    except FreeformError as exc:
+    choice, message = _message(response)
+    if choice.get("finish_reason") != "stop":
         spec, response_field = {}, "invalid"
-        parse_error = str(exc)
+        parse_error = f"audit response did not finish: {choice.get('finish_reason')!r}"
     else:
-        parse_error = ""
+        try:
+            spec, response_field = _result_object(
+                message, {"key_check", "coding_verdict", "verdict", "reason"}
+            )
+        except FreeformError as exc:
+            spec, response_field = {}, "invalid"
+            parse_error = str(exc)
+        else:
+            parse_error = ""
     verdict = spec.get("verdict")
     coding_verdict = spec.get("coding_verdict")
     reason = spec.get("reason")

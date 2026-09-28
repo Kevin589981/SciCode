@@ -8,6 +8,8 @@ Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；
 
 同一次 Kimi 审核保留原有科学正确性判断，并额外判断题目是否确实从素材引出编程任务、最终代码是否回应题目。两项均通过才进入 SFT 候选。这里只检查实质交付，不用固定题型、字数、Python `def` 或 Markdown 代码围栏作硬门槛；不以运行成功代替科学性判断。旧的自由问答工件与新任务、审核、SFT 使用不同 schema/policy/job kind，新运行须使用新的数据库和输出目录。
 
+作者和审核的 JSON 只从模型最终 `content` 读取，且请求必须正常以 `stop` 结束；推理中的草稿 JSON 和 `length` 截断不会被当成合格工件。高延迟推理服务可能先消耗大量输出 token，出题默认预算为 65535，审核默认预算为 32768，均可按端点容量覆盖。此前已写出的截断工件留作诊断，但不能再被新流程读作有效题目。
+
 ## yicloud 上的小规模命令
 
 在 /root/ScienceIDE-workspace/SciCode-diverse-self-distill 目录执行，以下目录仅作示例。先确认使用的 Qwen 服务确实是基座模型，Kimi 与 Qwen 各用独立的端点环境变量。密钥通过环境注入，脚本与 recipe 不保存密钥。
@@ -38,7 +40,8 @@ Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；
       --recipe .cache/freeform-coding-smoke/recipe.json \
       --author-model Kimi-K3 --solver-model BASE_QWEN_MODEL_NAME \
       --audit-model Kimi-K3 --attempts 2 \
-      --author-max-tokens 16384 --solver-max-tokens 131072
+      --author-max-tokens 65535 --solver-max-tokens 131072 \
+      --audit-max-tokens 32768
 
     "$PY" -m factory.reasoning.freeform_batch run \
       --db .cache/freeform-coding-smoke/queue.sqlite \
@@ -69,4 +72,4 @@ Kimi 作者提示词保持简短，并随机使用几种自然的提问开头；
 
 所有原始响应保留在 shard 中。审核只影响 SFT 候选，不改写 Kimi 题面或 Qwen 的思维链。批量运行可用更多 worker，但 Kimi/Qwen 并发槽分别设置，并首先用少量真实样本检查题目是否要求实际代码、代码是否回应素材与题目、随机采样差异和训练模板读取结果。
 
-审核文件实际名称包含 policy_version，例如 audit-0-scientific-coding-overall-v1.json。审核提示词更新时可在同一目录留下旧判定并另存新版判定，方便比较校准；题目与 Qwen trace 保持原样。
+审核文件实际名称包含 policy_version，例如 audit-0-scientific-coding-overall-v2.json。审核提示词更新时可在同一目录留下旧判定并另存新版判定，方便比较校准；题目与 Qwen trace 保持原样。
