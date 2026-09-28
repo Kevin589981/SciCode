@@ -11,6 +11,7 @@ from factory.reasoning.freeform import (
     SFT_SCHEMA,
     TASK_SCHEMA,
     author_messages,
+    audit_messages,
     audit_trace,
     collect_trace,
     compose_task,
@@ -124,6 +125,9 @@ class FreeformPipelineTests(unittest.TestCase):
         self.assertEqual(trace["reasoning_content"],
                          "由 E(x)=x²，得 E(fx)=(fx)²=f²E(x)。函数直接计算缩放后的浓度平方。")
         self.assertEqual(trace["prompt"], qwen_messages(task))
+        review_prompt = audit_messages(task, trace)[0]["content"]
+        self.assertIn("最终回答作为一个交付物整体判断", review_prompt)
+        self.assertIn("核心接口、输入输出或功能", review_prompt)
         audit = audit_trace(
             task, trace, chat_fn=fake_chat, model="kimi-audit",
             base_url="http://kimi/v1", api_key="dummy",

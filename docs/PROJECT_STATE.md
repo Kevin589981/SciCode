@@ -23,6 +23,25 @@ code. No fixed archetype, language, code fence, test-pass or length threshold
 defines acceptance. Raw questions, traces and audits remain available even
 when not exported to SFT. Historical datasets and pipelines are unchanged.
 
+Clean-base alignment reference: `/root/scicode-avacore/runs/scicode-qwen35-base-temp10-xhigh-bg-test-c20-20260910-v1/rollouts.jsonl`
+has `run_id=45` and model `Qwen3.5-35B-A3B`; the paired validation run
+is `run_id=44`. In the 65-row test run, 60 problems have multiple substeps.
+For problem 14, each substep stores a user prompt plus an assistant message
+with separate native `reasoning_content` and code-bearing `content`; the
+second prompt includes the first step's generated function. The freeform
+pipeline matches the native reasoning/final-answer fields but currently
+produces single-turn, self-contained tasks and does not train cumulative
+step-to-step coding context. This is a transfer gap to measure, not a reason
+to copy SciCode's rigid response wrapper into generated questions.
+
+The SMILES focused smoke produced two Qwen traces. The first was correctly
+rejected for breaking marked-token round-trip. The second was accepted under
+audit policy v2 despite an unfinished CLI and hard-coded output filename;
+that is a false positive, not approved SFT data. Audit policy v3 explicitly
+checks the final code deliverable as a whole against the task's core interface
+and output requirements. Keep older audit artifacts for comparison, but use
+only the current policy for new SFT export.
+
 ## Objective
 
 Learn from ScienceIDE's automated production philosophy and build a SciCode

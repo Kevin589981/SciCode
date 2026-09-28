@@ -19,7 +19,7 @@ from .schema import canonical_hash
 TASK_SCHEMA = "scicode-freeform-coding-task-v2"
 TRACE_SCHEMA = "scicode-qwen-native-trace-v1"
 AUDIT_SCHEMA = "scicode-freeform-coding-audit-v1"
-AUDIT_POLICY = "scientific-coding-overall-v2"
+AUDIT_POLICY = "scientific-coding-overall-v3"
 SFT_SCHEMA = "scicode-qwen-native-coding-sft-v2"
 AUTHOR_PROMPT_POLICY = "freeform-scientific-coding-v2"
 AUTHOR_OPENERS = (
@@ -251,10 +251,14 @@ def audit_messages(task: dict, trace: dict) -> list[dict]:
         "还须判断题面是否自含解题所需信息、是否从素材引出需要编写代码的科学任务，"
         "以及 Qwen 最终回答是否给出了实际完成该任务的代码。"
         "允许不同编程语言、实现方法和呈现形式；只有概念解释或伪代码不算代码交付。"
+        "把最终回答作为一个交付物整体判断，不替它补全未完成的代码草稿。"
+        "题面明确要求的核心接口、输入输出或功能若未实现，"
+        "不能因某个示例恰好能运行就视为完成。"
         "这项判断写入 coding_verdict，取 accept、reject 或 uncertain。"
         "只返回 JSON 对象，字段为 key_check、coding_verdict、verdict、reason；"
-        "key_check 简要写出题面关键关系与回答对应关系的对照及最重要的差异，"
-        "verdict 判断科学正确性；verdict 与 coding_verdict 均须严格取 accept、reject 或 uncertain。"
+        "key_check 简要写出题面关键科学关系及核心交付与回答的对应、最重要的差异，"
+        "verdict 判断科学正确性和回答是否完成题面交付；"
+        "verdict 与 coding_verdict 均须严格取 accept、reject 或 uncertain。"
         "\n\n原始科学素材：\n" + str(task["source"].get("excerpt") or "")
         + "\n\n内部参考答案（仅供核查）：\n" + task["reference_answer"]
         + "\n\nQwen 推理：\n" + trace["reasoning_content"]
