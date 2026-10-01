@@ -1,4 +1,4 @@
-"""Controlled prompt-reuse distillation; no network calls without `run`/`audit`."""
+"""Controlled prompt-reuse distillation; only run/audit/grade call model APIs."""
 
 from __future__ import annotations
 

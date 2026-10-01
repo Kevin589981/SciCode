@@ -162,6 +162,7 @@ def build(tasks_path: Path, traces_path: Path, out_dir: Path, *,
             output.write(payload)
             candidate = copy.deepcopy(trace)
             candidate["thinking_format"] = "separate_reasoning_content"
+            candidate["audit_prompt_policy"] = "system-user-v1"
             candidate["archetype"] = task["archetype"]
             candidate["termination"] = row["metadata"]["termination"]
             candidate["messages"][-1].update({

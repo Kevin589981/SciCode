@@ -56,6 +56,15 @@ def _sample(row: dict) -> tuple[str, str, str, bool]:
     trace_id = row.get("trace_id")
     if not isinstance(trace_id, str) or not trace_id:
         raise AuditError("missing trace_id")
+    if row.get("audit_prompt_policy") == "system-user-v1":
+        visible = messages[:2]
+        if [m.get("role") for m in visible] != ["system", "user"] or any(
+            not isinstance(m.get("content"), str) for m in visible
+        ):
+            raise AuditError("invalid full visible prompt")
+        # New distillation candidates expose all actual request instructions,
+        # including system constraints, but never author-only task fields.
+        prompt = json.dumps(visible, ensure_ascii=False)
     return trace_id, prompt, answer, bool(assistants[0].get("content_loss"))
 
 

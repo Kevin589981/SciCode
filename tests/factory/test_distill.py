@@ -193,6 +193,7 @@ def test_audit_adapter_works_with_existing_review_engine(tmp_path):
         {"status": "consistent", "conflicts": [], "rationale": "no contradictions"},
     ])
     def review(*_a, **_kw):
+        assert "Exact old system" in _a[0][0]["content"] or "REQUIREMENTS AND INDEPENDENT PROBES" in _a[0][0]["content"]
         return response(reasoning="review thinking", answer=json.dumps(next(replies)))
     audit_path = tmp_path / "audit.jsonl"
     counts = run_audit(native / "audit-candidates.jsonl", audit_path, model="reviewer", workers=1, chat_fn=review)
