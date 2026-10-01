@@ -32,7 +32,7 @@ def client_config() -> dict:
 
 def _stream_response(response, *, allow_partial: bool) -> dict:
     """Assemble SSE chunks, including native reasoning and final usage."""
-    message = {"role": "assistant", "content": "", "reasoning_content": ""}
+    fragments = {"content": [], "reasoning_content": []}
     usage = {}
     finish_reason = None
     response_id = None
@@ -40,7 +40,9 @@ def _stream_response(response, *, allow_partial: bool) -> dict:
     def assembled(reason: str) -> dict:
         return {
             "id": response_id,
-            "choices": [{"index": 0, "message": message, "finish_reason": reason}],
+            "choices": [{"index": 0, "message": {
+                "role": "assistant", **{field: "".join(parts) for field, parts in fragments.items()},
+            }, "finish_reason": reason}],
             "usage": usage,
         }
 
@@ -63,16 +65,16 @@ def _stream_response(response, *, allow_partial: bool) -> dict:
                 delta = choice.get("delta") or {}
                 for field in ("content", "reasoning_content"):
                     value = delta.get(field)
-                    if isinstance(value, str):
-                        message[field] += value
+                    if isinstance(value, str) and value:
+                        fragments[field].append(value)
                 finish_reason = choice.get("finish_reason") or finish_reason
     except (OSError, TimeoutError, ValueError):
-        if allow_partial and (message["content"] or message["reasoning_content"]):
+        if allow_partial and any(fragments.values()):
             return assembled("stream_interrupted")
         raise
     if finish_reason:
         return assembled(finish_reason)
-    if allow_partial and (message["content"] or message["reasoning_content"]):
+    if allow_partial and any(fragments.values()):
         return assembled("stream_interrupted")
     raise RuntimeError("stream ended without a finish_reason or usable content")
 

@@ -237,6 +237,8 @@ def test_reasoning_review_is_bound_and_release_requires_both_channels(tmp_path, 
     export(prepared, output, native)
     quality = tmp_path / "quality.jsonl"
     value = grade_for()
+    value["reasoning_evidence"] = {"useful_quote": "derive carefully", "redundant_quote": "",
+                                   "efficiency": "efficient", "explanation": "short useful derivation"}
     value["message_annotations"][0]["train_content"] = approve_content
     seen = []
     def judge(messages, **_kw):
@@ -302,3 +304,18 @@ def test_provider_thinking_options_and_raw_backup(tmp_path):
     assert list(rows(output / "raw-responses.jsonl"))[0]["response"]["choices"][0]["message"]["content"] == "final without thinking"
     with pytest.raises(ValueError, match="no valid traces"):
         export(prepared, output, tmp_path / "native")
+
+
+@pytest.mark.parametrize("quote", ["Result", "d"])
+def test_reasoning_evidence_cannot_quote_final_answer_or_one_letter(tmp_path, quote):
+    prepared, _ = inputs(tmp_path)
+    output = tmp_path / "solver"
+    run(prepared, output, config(), chat_fn=lambda *_a, **_k: response())
+    native = tmp_path / "native"
+    export(prepared, output, native)
+    value = grade_for()
+    value["reasoning_evidence"] = {"useful_quote": quote, "redundant_quote": "",
+                                   "efficiency": "efficient", "explanation": "claim"}
+    result = grade_reasoning(prepared, native, tmp_path / "quality.jsonl", "reviewer", workers=1,
+                            chat_fn=lambda *_a, **_k: response(answer=json.dumps(value)))
+    assert result["error"] == 1

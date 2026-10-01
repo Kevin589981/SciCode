@@ -23,6 +23,7 @@ from .schema import canonical_hash, validate_task
 from .student_view import REUSED_PROMPT_POLICY, trace_student_prompt
 
 POLICY = "scicode-deepseek-prompt-reuse-distillation-v1"
+REASONING_REVIEW_POLICY = "reasoning-value-v4-quoted-cot-evidence-v1"
 
 
 def dump(path: Path, value: dict) -> None:
@@ -200,7 +201,7 @@ def export(inputs: Path, output: Path, out_dir: Path) -> dict:
 def grade_reasoning(inputs: Path, native: Path, output: Path, reviewer: str,
                     *, workers=64, max_tokens=65536, timeout=2400, chat_fn=llm.chat) -> dict:
     """One reviewer model, full CoT, offset-indexed bounded scheduling."""
-    from .grade import judge_trace, GRADE_POLICY_VERSION
+    from .grade import judge_trace
     if not 1 <= workers <= 2000:
         raise ValueError("workers must be in [1, 2000]")
     source_path = native / "audit-candidates.jsonl"
@@ -212,7 +213,7 @@ def grade_reasoning(inputs: Path, native: Path, output: Path, reviewer: str,
     with controller_lock(output, exclusive=True):
         if output.exists():
             for old in rows(output):
-                if old.get("policy") != GRADE_POLICY_VERSION or old.get("model") != reviewer:
+                if old.get("policy") != REASONING_REVIEW_POLICY or old.get("model") != reviewer:
                     raise ValueError("existing reasoning grades use another model/policy")
                 previous[old["trace_id"]] = old
         jobs = []
@@ -242,7 +243,7 @@ def grade_reasoning(inputs: Path, native: Path, output: Path, reviewer: str,
 
         def one(job):
             offset, length, identity, digest = job
-            result = {"policy": GRADE_POLICY_VERSION, "model": reviewer,
+            result = {"policy": REASONING_REVIEW_POLICY, "model": reviewer,
                       "trace_id": identity, "row_sha256": digest}
             try:
                 with source_path.open("rb") as stream:
@@ -253,7 +254,8 @@ def grade_reasoning(inputs: Path, native: Path, output: Path, reviewer: str,
                 trace = json.loads(raw)
                 result["grade"] = judge_trace(tasks[trace["task_id"]], trace, model=reviewer,
                                               max_tokens=max_tokens, timeout=timeout,
-                                              max_input_chars=750000, chat_fn=chat_fn)
+                                              max_input_chars=750000, chat_fn=chat_fn,
+                                              require_reasoning_evidence=True)
             except Exception as exc:
                 result["error"] = f"{type(exc).__name__}: {exc}"[:1000]
             return result
@@ -304,9 +306,8 @@ def select_reviewed(native: Path, audit_path: Path, out_dir: Path, reviewer: str
             raise ValueError("audit refers to a different candidate response")
     grades = {}
     if grades_path is not None:
-        from .grade import GRADE_POLICY_VERSION
         for grade in rows(grades_path):
-            if (grade.get("policy") != GRADE_POLICY_VERSION or grade.get("model") != reviewer
+            if (grade.get("policy") != REASONING_REVIEW_POLICY or grade.get("model") != reviewer
                 or grade.get("row_sha256") != candidates.get(grade.get("trace_id"))):
                 raise ValueError("reasoning review does not match candidate/policy/model")
             old = grades.get(grade["trace_id"])
@@ -335,6 +336,7 @@ def select_reviewed(native: Path, audit_path: Path, out_dir: Path, reviewer: str
             value = (quality or {}).get("grade") or {}
             annotations = value.get("message_annotations") or []
             if (status == "model_supported_answer" and value.get("trainable") is True
+                and (value.get("reasoning_evidence") or {}).get("efficiency") in {"efficient", "productive_but_long"}
                 and any(a.get("message_index") == 2 and a.get("train_reasoning") is True
                         and a.get("train_content") is True for a in annotations)):
                 ready.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -348,7 +350,7 @@ def select_reviewed(native: Path, audit_path: Path, out_dir: Path, reviewer: str
               "source_native_sha256": file_sha256(native / "sft.jsonl"),
               "audit_sha256": file_sha256(audit_path),
               "reasoning_review_sha256": file_sha256(grades_path) if grades_path else None,
-              "sft_ready_requires": "answer support + reasoning grade trainable + both channels approved",
+              "sft_ready_requires": "answer support + reasoning grade trainable + both channels approved + quoted productive CoT",
               "sft_ready_sha256": file_sha256(out_dir / "sft.jsonl"),
               "output_sha256": {s: file_sha256(p) for s, p in paths.items()}}
     dump(out_dir / "manifest.json", report)

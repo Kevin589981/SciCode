@@ -3,6 +3,12 @@
 Status: isolated branch and analysis only, 2026-10-01. No DeepSeek generation,
 training, dataset upload or database change has been started.
 
+Historical planning snapshot. The user subsequently authorized implementation
+and limited debugging, but NOT a production batch. The implemented workflow and
+current acceptance evidence supersede the setup-only status above; see
+[DeepSeek acceptance](2026-10-01-deepseek-acceptance.md). Existing source datasets
+and the Qwen baseline remain untouched.
+
 ## Version lineage
 
 - Repository: existing public `Kevin589981/SciCode`.

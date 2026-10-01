@@ -91,6 +91,9 @@ bash factory/reasoning/run_4586_deepseek_reuse.sh run
 审核不执行学生代码，也不证明科学真值。科学审核分别生成只看题面的要求/反例
 计划、逐项答案检验、必要时交叉矛盾检查；thinking 质量沿用 outcome-independent
 评分规则，不按 assert pass/fail 直接判定。所有模型审核结论仍是证据而非证明。
+thinking 审核额外要求可逐字定位的推理引文及效率分类；最终答案中的引文不能
+冒充 thinking 引文，过短的单字引文也不接受。正式 SFT 仅接受 efficient 或
+productive_but_long；repetitive/uncertain 仍保留完整记录，不静默删除答案。
 
 ## JSONL 与不丢失答案的边界
 
@@ -106,6 +109,8 @@ bash factory/reasoning/run_4586_deepseek_reuse.sh run
   是本轮计数，不把历史 error 计作永久失败。中断时最后快照可能滞后一个写入。
 - `native-v1/sft.jsonl`：完整生成的结构候选，每行 `id/messages/metadata`；
   assistant 为 `<think>完整推理</think>最终答案`。metadata 明确 `not_reviewed`。
+  reasoning_metrics 记录字符数及教师 API 报告的 reasoning/text tokens，不能将
+  教师计数误当成学生有效训练 token。
 - `native-v1/audit-candidates.jsonl`：同一回答的分字段审核输入，SHA256 绑定。
 - `native-v1/excluded.jsonl`：截断/缺通道/边界歧义说明与原始 trace 位置。
   不删除原始内容；不因截断就宣称 thinking 无价值，但不混入完整答案比较集。
@@ -133,3 +138,28 @@ watch -n 30 'cat /root/ScienceIDE-workspace/SciCode-deepseek-distill-20261001/da
 本轮交付的是合成/审核实现，不启动 SFT、测评、数据库上传或 math/STEM 混合。
 API usage 不是学生有效监督 token。后续对齐训练预算仍须固定 Qwen tokenizer、
 chat template、loss mask、截断和 packing 配置；教师响应数相同不等于 token 等量。
+
+## 2026-10-01 实测验收记录
+
+- 全量输入：4586/4586，2182 个仓库，最多每仓库 8 题，准备阶段拒绝 0。
+- 原始 4586 数据 SHA256：
+  `2894ca0e6a9df3e1e5c22c35053082512374b19a0b029941070718264c274424`。
+- 启用 thinking 后的真实两题 smoke：并行 2，max_tokens=196608；两题均 stop、
+  未截断、无请求错误。续跑 skipped=2，无追加请求，成功导出两条完整 SFT 候选。
+- 第一道 diagnose_revise：25696 reasoning tokens + 2550 final text tokens，
+  用时 148.196 秒；第二道 compare_justify：53321 + 4552，用时 297.536 秒。
+  这是服务端 API 的计数，不是 Qwen 学生 token。
+- 两道都有 Python fence。第一道两个 fence 中一个可被 ast.parse 解析，另一个
+  需检查是否为示意片段；第二道两个 fence 都可解析。没有执行这些生成代码。
+- 第一条还用同一 DeepSeek 做过一次诊断性 thinking 评分，JSON 能通过旧评分
+  schema，但该自评不是独立科学审核，也不满足后来新增的引文证据门槛。
+- 科学审核与双通道 release 路径有离线端到端测试；尚未对这两条正式执行 Kimi
+  科学性审核。不能把这两条结构候选称为已科学审核合格的训练数据。
+- 长请求的原 SSH 返回通道发生滞留；直接读取服务器产物确认两题早已完成。
+  后续 SSH 调试使用 ServerAliveInterval/ServerAliveCountMax，正式批次批准后
+  应在服务器后台运行并看文件进度，而不依赖长时间 SSH 输出返回。
+
+真实样例目录：
+`/root/ScienceIDE-workspace/SciCode-deepseek-distill-20261001/data-reasoning-deepseek-smoke-2-v2/`。
+原始 traces 在 solver；初版 native-v1 保留；验收最新版结构导出另存 native-v2。
+完整 4586 条批次只有 inputs，未创建 solver 目录、未启动合成。

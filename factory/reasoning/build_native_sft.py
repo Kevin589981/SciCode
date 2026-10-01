@@ -150,6 +150,11 @@ def build(tasks_path: Path, traces_path: Path, out_dir: Path, *,
                     "trace_provenance": trace.get("provenance"),
                     "run_fingerprint": (run_manifest or {}).get("fingerprint"),
                     "teacher_revision": (run_manifest or {}).get("generation", {}).get("teacher_revision"),
+                    "reasoning_metrics": {
+                        "reasoning_chars": len(reasoning), "answer_chars": len(answer),
+                        "reported_reasoning_tokens": (trace.get("usage", {}).get("completion_tokens_details") or {}).get("reasoning_tokens"),
+                        "reported_text_tokens": (trace.get("usage", {}).get("completion_tokens_details") or {}).get("text_tokens"),
+                    },
                     "scientific_correctness_proven": False,
                     "termination": {
                         "finish_reason": trace["finish_reason"],

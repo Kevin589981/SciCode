@@ -169,6 +169,7 @@ def judge_trace(
     max_tokens: int = 8192,
     timeout: int = 2400,
     max_input_chars: int = 160_000,
+    require_reasoning_evidence: bool = False,
 ) -> dict:
     """Grade the complete native-thinking trace and derive supervision policy."""
     task = validate_task(task)
@@ -181,6 +182,16 @@ def judge_trace(
         raise GradeError(str(exc)) from exc
     model = model or llm.client_config()["model"]
     prompt = _judge_prompt(task, trace)
+    if require_reasoning_evidence:
+        prompt += """\nADDITIONAL CoT EVIDENCE CONTRACT:
+Do not infer reasoning quality merely from a correct final answer. Add a
+reasoning_evidence object to the JSON with useful_quote (one exact nonempty
+substring of reasoning_content), redundant_quote (one exact substring, or an
+empty string if none), efficiency (efficient|productive_but_long|repetitive|uncertain),
+and explanation (specific reasoning about useful progress versus repetition).
+Quote the actual reasoning channel, not the final answer. Extensive genuine
+exploration can be productive_but_long; circular repetition is not deep thought.
+"""
     if len(prompt) > max_input_chars:
         raise GradeError(
             f"complete judge input is {len(prompt)} chars > {max_input_chars}; "
@@ -228,6 +239,19 @@ def judge_trace(
             "usage": response.get("usage") or {},
         },
     }
+    if require_reasoning_evidence:
+        evidence = value.get("reasoning_evidence")
+        reasoning = "\n".join(m.get("reasoning_content") or "" for m in trace["messages"] if m["role"] == "assistant")
+        if (not isinstance(evidence, dict)
+            or not isinstance(evidence.get("useful_quote"), str)
+            or len(evidence["useful_quote"].strip()) < min(32, len(reasoning.strip()))
+            or not evidence["useful_quote"].strip() or evidence["useful_quote"] not in reasoning
+            or not isinstance(evidence.get("redundant_quote"), str)
+            or (evidence["redundant_quote"] and evidence["redundant_quote"] not in reasoning)
+            or evidence.get("efficiency") not in {"efficient", "productive_but_long", "repetitive", "uncertain"}
+            or not isinstance(evidence.get("explanation"), str) or not evidence["explanation"].strip()):
+            raise GradeError("reasoning review requires verifiable CoT quotes and efficiency assessment")
+        grade["reasoning_evidence"] = evidence
     try:
         return validate_grade(grade, trace)
     except SchemaError as exc:
