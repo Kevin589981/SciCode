@@ -61,9 +61,23 @@ rows, rather than the later 4,586 supported reasoning-plus-answer rows. The
 selection utility trusts its input population; it does not itself filter audit
 dispositions. Passing a narrower input file matters.
 
+The actual selected IDs were also joined to both exported datasets:
+
+- All 1,000 belong to the 4,939-row export: 927 `model_supported_answer`,
+  45 `reasoning_candidate`, and 28 `audit_error`.
+- Only 927 belong to the later 4,586-row supported reasoning-plus-answer export.
+- Both source exports have as many distinct task hashes as rows (4,939 and
+  4,586 respectively), so task-hash deduplication alone is not the 1k limit.
+- The existing Qwen run has 1,000 distinct traces: 991 finish with `stop`,
+  nine with `length` and truncation. Its error sidecar contains 336 historical
+  error events; these are not 336 currently missing tasks.
+
+These observations describe the existing pilot only, not the outcome of a new
+scientific audit or the count of structurally exportable SFT rows.
+
 For the forthcoming teacher comparison, the intended population is:
 
-`/root/ScienceIDE-workspace/SciCode-v3/data-reasoning-10k-v1-cleaned-v1/datasets/scicode-v1-supported-cot-answer-sft-4586-v1/sft.jsonl`
+`/root/ScienceIDE-workspace/SciCode-v3/datasets/scicode-v1-supported-cot-answer-sft-4586-v1/sft.jsonl`
 
 Use the original index/task files for provenance. A requested target of 4,586
 still requires checking distinct task hashes and the repository cap; the utility
