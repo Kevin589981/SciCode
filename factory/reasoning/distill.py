@@ -337,7 +337,11 @@ def select_reviewed(native: Path, audit_path: Path, out_dir: Path, reviewer: str
             row["metadata"].update({"audit_disposition": status, "audit_policy": audit_policy,
                                     "reviewer_model": reviewer, "training_target": "reasoning_and_answer"})
             quality = grades.get(row["id"])
-            row["metadata"]["reasoning_review"] = quality
+            # Reviewer thinking is diagnostic evidence, NEVER a second teacher
+            # target. Keep its large raw response in the separate grade file.
+            row["metadata"]["reasoning_review"] = {
+                k: v for k, v in quality.items() if k != "review_response"
+            } if quality else None
             handles[status].write(json.dumps(row, ensure_ascii=False) + "\n")
             counts[status] += 1
             value = (quality or {}).get("grade") or {}
