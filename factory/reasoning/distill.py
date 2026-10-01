@@ -73,10 +73,22 @@ def load_config(path: Path) -> dict:
 
 def validate_inputs(inputs: Path, cfg: dict) -> dict:
     report = json.loads((inputs / "selection_report.json").read_text(encoding="utf-8"))
-    if report.get("require_supported") is not True or report.get("old_assistant_responses_copied") != 0:
-        raise ValueError("inputs must be prepared with --require-supported")
+    from .prepare_complement import SELECTION_POLICY as COMPLEMENT_POLICY
+    complement = report.get("selection_policy") == COMPLEMENT_POLICY
+    if report.get("old_assistant_responses_copied") != 0 or (
+        not complement and report.get("require_supported") is not True
+    ):
+        raise ValueError("inputs must be prepared with --require-supported or explicit complement policy")
+    if complement and (report.get("require_supported") is not False
+                       or report.get("old_answer_support_required") is not False):
+        raise ValueError("complement must not masquerade as supported teacher answers")
     hashes = report.get("input_sha256") or {}
-    for name in ("tasks.jsonl", "prompts.jsonl", "source_index.jsonl"):
+    input_names = ("tasks.jsonl", "prompts.jsonl", "source_index.jsonl")
+    if complement:
+        input_names += ("exclusions.jsonl",)
+    if set(hashes) != set(input_names):
+        raise ValueError("unexpected input hash artifact set")
+    for name in input_names:
         if file_sha256(inputs / name) != hashes.get(name):
             raise ValueError(f"input artifact changed: {name}")
     tasks = {r["task_id"]: validate_task(r) for r in rows(inputs / "tasks.jsonl")}
@@ -86,12 +98,27 @@ def validate_inputs(inputs: Path, cfg: dict) -> dict:
     if not expected or any(len(v) != expected for v in (tasks, prompts, sources)):
         raise ValueError("duplicate/missing task, prompt or source IDs")
     maximum_input_bound = 0
+    exclusions = list(rows(inputs / "exclusions.jsonl")) if complement else []
+    if complement and len(exclusions) != report.get("excluded_selected"):
+        raise ValueError("complement exclusion snapshot count mismatch")
+    excluded_tasks = {r["task_id"] for r in exclusions}
+    excluded_ids = {r["old_trace_id"] for r in exclusions}
+    excluded_hashes = {r["task_hash"] for r in exclusions}
+    excluded_prompts = {r["student_view_hash"] for r in exclusions}
+    excluded_users = {r["user_sha256"] for r in exclusions}
     for task in tasks.values():
         task_hash = canonical_hash(task)
         prompt = prompts[task_hash]
         expected_hash = canonical_hash({"policy_version": REUSED_PROMPT_POLICY, "messages": prompt})
         if sources[task_hash].get("student_view_hash") != expected_hash:
             raise ValueError("selected source/prompt hash mismatch")
+        if complement and (
+            task["task_id"] in excluded_tasks or task_hash in excluded_hashes
+            or sources[task_hash].get("old_trace_id") in excluded_ids
+            or expected_hash in excluded_prompts
+            or hashlib.sha256(prompt[1]["content"].encode()).hexdigest() in excluded_users
+        ):
+            raise ValueError("complement overlaps the excluded population")
         trace_student_prompt(task, {"messages": prompt, "provenance": {
             "student_view_policy": REUSED_PROMPT_POLICY, "student_view_hash": expected_hash,
         }})
