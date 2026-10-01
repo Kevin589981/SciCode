@@ -1,6 +1,45 @@
 # SciCode Reasoning-Trace Factory — Project State
 
-Last updated: 2026-09-21
+Last updated: 2026-10-02
+
+## Active experiment: DeepSeek regeneration of the remaining Kimi prompts
+
+User authorized computing the old 9,440 minus current 4,586 prompt population
+and independently launching the complement while they are away. The actual
+complement is **4,854** valid, distinct prompts, spanning 2,210 repositories.
+Original Kimi answer dispositions: 4,501 quarantine, 203 reasoning candidates,
+149 audit errors, and one supported answer previously omitted for lacking CoT.
+An unsupported old answer does not invalidate its question. Do not require old
+answer approval when reusing these prompts, and do not pass old assistant text
+to the new teacher. No overlap by old trace ID, task ID/hash, visible prompt hash,
+or visible user hash. Inputs and an exclusion snapshot are hash-bound.
+
+The purpose remains **scientific code generation with useful CoT**, not pure
+theory QA or reasoning-only SFT. This complement has 4,724 analysis-and-code and
+130 analysis-and-experiment tasks; preserve exact original prompts for this
+experiment rather than silently rewriting them or relaxing review standards.
+Both new reasoning and final answers (including code) must be retained in every
+raw/native/review partition. Quarantine is not deletion or proof of useless CoT.
+
+Branch: `exp/2026-10-02-deepseek-reuse-remaining-kimi-prompts`.
+Local: `D:/1/desktop/scienceIDE/SciCode-deepseek-complement-20261002`.
+Remote: `/root/ScienceIDE-workspace/SciCode-deepseek-complement-20261002`.
+Run root: `data-reasoning-deepseek-complement4854-20261002-v1` within that tree.
+Teacher DeepSeek-V4-Flash-0731 / 500 generation workers; reviewer Kimi-K3 / 500
+shared review workers. Both have 262,144-token context budgets. Teacher output
+budget 196,608; reviewer output budget 65,536, adjusted for complete input.
+Launch credentials remain outside Git and manifests. Preserve the active 4,586
+run, all original data, other worktrees, and the UV virtual environment.
+
+Details and commands: `docs/experiments/2026-10-02-deepseek-complement.md`.
+The output `launch_manifest.json` records the actual detached PID and commit;
+`pipeline_progress.json` and `solver/progress.json` are current runtime truth.
+No SFT training or database writes are authorized by this expansion request.
+
+Known audit limitations from the preceding analysis remain unchanged here:
+all-or-nothing requirements, and a consistency role that sees model-generated
+plans/findings rather than original prompt/answer. Preserve all partitions for
+later adjudication; never equate quarantine with proven useless reasoning.
 
 This file is the durable source of truth for project goals, decisions, progress,
 and constraints. Update it whenever a design decision or milestone changes.
