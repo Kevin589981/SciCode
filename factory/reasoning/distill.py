@@ -434,6 +434,8 @@ def main() -> None:
         result = select_reviewed(args.native, args.audit, args.out_dir, args.reviewer,
                                  grades_path=args.grades)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if args.command == "run" and result.get("errors", 0):
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

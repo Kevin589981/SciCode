@@ -64,6 +64,11 @@ prepare 要求输入每条都是 `model_supported_answer` + `reasoning_and_answe
 ## 用户批准后才运行的步骤
 
 以下均不是验收时自动执行的命令。生成与审核密钥由用户/安全环境提前设置。
+新批次可用 `bash factory/reasoning/run_4586_deepseek_reuse.sh pipeline` 一次串联
+生成→导出→科学审核→thinking 审核→分流。默认仍是 validate，不会误启动。
+pipeline 在任何生成请求错误时停止下游；原始产物保留，可先 run 续跑。
+若已完成导出而审核中断，用各阶段命令恢复，不自动覆盖旧 native/reviewed 目录。
+这些恢复规则避免复用已过时的审核输入，也不会停止其他输出目录的已有请求。
 
 ```bash
 # 会调用 DeepSeek；只在批准后执行。
