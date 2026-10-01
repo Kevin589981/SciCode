@@ -185,8 +185,7 @@ def collect_trace(
         raise RolloutError(f"raw trace violates the trace schema: {exc}") from exc
 
 
-def _jsonl(path: Path) -> list[dict]:
-    rows = []
+def _iter_jsonl(path: Path):
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
             if not line.strip():
@@ -197,8 +196,11 @@ def _jsonl(path: Path) -> list[dict]:
                 raise RolloutError(f"{path}:{number}: invalid JSON: {exc}") from exc
             if not isinstance(value, dict):
                 raise RolloutError(f"{path}:{number}: row must be an object")
-            rows.append(value)
-    return rows
+            yield value
+
+
+def _jsonl(path: Path) -> list[dict]:
+    return list(_iter_jsonl(path))
 
 
 def run_rollouts(
@@ -221,6 +223,8 @@ def run_rollouts(
     outcome_fn: Callable[[dict, dict], dict] | None = None,
     errors_path: Path | None = None,
     prompts_path: Path | None = None,
+    retry_incomplete: bool = False,
+    progress_path: Path | None = None,
 ) -> dict:
     """Roll out admitted tasks with bounded concurrency and exact resume keys."""
     if attempts < 1 or concurrency < 1:
@@ -287,8 +291,16 @@ def run_rollouts(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     errors_path = errors_path or output_path.with_suffix(".errors.jsonl")
-    existing = _jsonl(output_path) if output_path.exists() else []
-    done = {row.get("trace_id") for row in existing}
+    latest = {
+        row.get("trace_id"): {"finish_reason": row.get("finish_reason"), "truncated": row.get("truncated")}
+        for row in (_iter_jsonl(output_path) if output_path.exists() else [])
+    }
+    done = {
+        identity for identity, row in latest.items()
+        if not retry_incomplete or (
+            row.get("finish_reason") == "stop" and not row.get("truncated")
+        )
+    }
     jobs = []
     skipped = 0
     for task in selected:
@@ -304,7 +316,18 @@ def run_rollouts(
         "skipped": skipped,
         "not_admitted": len(tasks) - len(selected),
         "task_set_hash": task_set_hash,
+        "total_jobs": len(jobs),
     }
+
+    def progress():
+        if progress_path is not None:
+            path = Path(progress_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(counts, indent=2) + "\n", encoding="utf-8")
+            temporary.replace(path)
+
+    progress()
 
     def one(job):
         task, attempt, _trace_id = job
@@ -326,31 +349,36 @@ def run_rollouts(
     with output_path.open("a", encoding="utf-8") as output, Path(errors_path).open(
         "a", encoding="utf-8"
     ) as errors, futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
-        pending = {pool.submit(one, job): job for job in jobs}
-        for future in futures.as_completed(pending):
-            task, attempt, trace_id = pending[future]
-            try:
-                trace = future.result()
-            except Exception as exc:
-                errors.write(
-                    json.dumps(
-                        {
-                            "trace_id": trace_id,
-                            "task_id": task["task_id"],
-                            "attempt": attempt,
-                            "model": model,
-                            "error": f"{type(exc).__name__}: {exc}"[:1200],
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-                errors.flush()
-                counts["errors"] += 1
-                continue
-            output.write(json.dumps(trace, ensure_ascii=False) + "\n")
-            output.flush()
-            counts["written"] += 1
+        iterator = iter(jobs)
+        pending = {}
+
+        def submit_next():
+            job = next(iterator, None)
+            if job is not None:
+                pending[pool.submit(one, job)] = job
+
+        for _ in range(min(len(jobs), concurrency)):
+            submit_next()
+        while pending:
+            completed, _ = futures.wait(pending, return_when=futures.FIRST_COMPLETED)
+            for future in completed:
+                task, attempt, trace_id = pending.pop(future)
+                try:
+                    trace = future.result()
+                except Exception as exc:
+                    errors.write(json.dumps({
+                        "trace_id": trace_id, "task_id": task["task_id"],
+                        "attempt": attempt, "model": model,
+                        "error": f"{type(exc).__name__}: {exc}"[:1200],
+                    }, ensure_ascii=False) + "\n")
+                    errors.flush()
+                    counts["errors"] += 1
+                else:
+                    output.write(json.dumps(trace, ensure_ascii=False) + "\n")
+                    output.flush()
+                    counts["written"] += 1
+                progress()
+                submit_next()
     return counts
 
 

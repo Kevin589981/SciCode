@@ -193,6 +193,8 @@ def judge_trace(
         max_tokens=max_tokens,
         timeout=timeout,
     )
+    if (response.get("choices") or [{}])[0].get("finish_reason") in {"length", "stream_interrupted"}:
+        raise GradeError("reasoning review response was truncated")
     try:
         value = _parse_object(response["choices"][0]["message"].get("content") or "")
     except (KeyError, IndexError, TypeError) as exc:

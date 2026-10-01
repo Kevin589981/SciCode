@@ -13,6 +13,15 @@ from collections import Counter
 from pathlib import Path
 
 from .schema import canonical_hash, validate_task
+from .student_view import REUSED_PROMPT_POLICY
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def rows(path: Path):
@@ -30,16 +39,32 @@ def write_rows(path: Path, data: list[dict]) -> None:
 
 def prepare(
     *, sft_path: Path, index_path: Path, source_root: Path,
-    out_dir: Path, target: int, per_repo: int,
+    out_dir: Path, target: int, per_repo: int, require_supported: bool = False,
 ) -> dict:
-    if target < 1 or per_repo < 1:
-        raise ValueError("target and per_repo must be positive")
+    if target < 1 or per_repo < 0:
+        raise ValueError("target must be positive; per_repo=0 means no cap")
     if out_dir.exists() and any(out_dir.iterdir()):
         raise FileExistsError(f"refusing to overwrite nonempty directory: {out_dir}")
     source_root = source_root.resolve()
     audited = {}
+    source_hash = file_sha256(sft_path)
+    index_hash = file_sha256(index_path)
     for row in rows(sft_path):
         messages = row.get("messages") or []
+        if row.get("id") in audited:
+            raise ValueError(f"duplicate source ID: {row.get('id')}")
+        if require_supported:
+            metadata = row.get("metadata") or {}
+            if (
+                metadata.get("audit_disposition") != "model_supported_answer"
+                or metadata.get("training_target") != "reasoning_and_answer"
+                or [m.get("role") for m in messages] != ["system", "user", "assistant"]
+                or not isinstance(messages[-1].get("content"), str)
+                or not messages[-1]["content"].startswith("<think>")
+                or "</think>" not in messages[-1]["content"]
+                or not messages[-1]["content"].split("</think>", 1)[1].strip()
+            ):
+                raise ValueError(f"source is not supported CoT plus answer: {row.get('id')}")
         if len(messages) < 3:
             continue
         audited[row["id"]] = {
@@ -52,6 +77,8 @@ def prepare(
     for row in rows(index_path):
         trace_id = row.get("trace_id")
         if trace_id in audited:
+            if trace_id in locations:
+                raise ValueError(f"duplicate source index ID: {trace_id}")
             locations[trace_id] = row
 
     candidates = []
@@ -102,7 +129,7 @@ def prepare(
     for item in candidates:
         trace_id, repo, task, task_file, _old = item
         task_hash = canonical_hash(task)
-        if task_hash in seen_hashes or repo_counts[repo] >= per_repo:
+        if task_hash in seen_hashes or (per_repo and repo_counts[repo] >= per_repo):
             continue
         selected.append(item)
         seen_hashes.add(task_hash)
@@ -114,6 +141,8 @@ def prepare(
             f"only {len(selected)} eligible tasks after per-repo cap; "
             f"candidates={len(candidates)}, rejected={dict(rejected)}"
         )
+    if source_hash != file_sha256(sft_path) or index_hash != file_sha256(index_path):
+        raise ValueError("source SFT/index changed during preparation")
     out_dir.mkdir(parents=True, exist_ok=True)
     write_rows(out_dir / "tasks.jsonl", [item[2] for item in selected])
     write_rows(out_dir / "prompts.jsonl", [
@@ -132,8 +161,15 @@ def prepare(
             "task_id": task["task_id"],
             "task_hash": canonical_hash(task),
             "source_task_file": task_file,
+            "student_view_hash": canonical_hash({
+                "policy_version": REUSED_PROMPT_POLICY,
+                "messages": [
+                    {"role": "system", "content": old["system"]},
+                    {"role": "user", "content": old["user"]},
+                ],
+            }),
         }
-        for trace_id, _repo, task, task_file, _old in selected
+        for trace_id, _repo, task, task_file, old in selected
     ])
     report = {
         "target": target,
@@ -144,6 +180,17 @@ def prepare(
         "eligible_candidates": len(candidates),
         "rejected": dict(rejected),
         "old_assistant_responses_copied": 0,
+        "require_supported": require_supported,
+        "per_repository_cap": per_repo or None,
+        "source_sft": str(sft_path.resolve()),
+        "source_sft_sha256": source_hash,
+        "source_index": str(index_path.resolve()),
+        "source_index_sha256": index_hash,
+        "selection_policy": "sha256-old-id-sort-distinct-task-v1",
+        "input_sha256": {
+            name: file_sha256(out_dir / name)
+            for name in ("tasks.jsonl", "prompts.jsonl", "source_index.jsonl")
+        },
     }
     (out_dir / "selection_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -159,11 +206,13 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--target", type=int, default=1000)
     parser.add_argument("--per-repo", type=int, default=5)
+    parser.add_argument("--require-supported", action="store_true")
     args = parser.parse_args()
     print(json.dumps(prepare(
         sft_path=args.sft, index_path=args.index,
         source_root=args.source_root, out_dir=args.out_dir,
         target=args.target, per_repo=args.per_repo,
+        require_supported=args.require_supported,
     ), ensure_ascii=False, indent=2))
 
 
