@@ -253,7 +253,11 @@ exploration can be productive_but_long; circular repetition is not deep thought.
             or (evidence["redundant_quote"] and evidence["redundant_quote"] not in reasoning)
             or evidence.get("efficiency") not in {"efficient", "productive_but_long", "repetitive", "uncertain"}
             or not isinstance(evidence.get("explanation"), str) or not evidence["explanation"].strip()):
+            bad_quotes = [name for name in ("useful_quote", "redundant_quote")
+                          if isinstance(evidence, dict) and isinstance(evidence.get(name), str)
+                          and evidence[name] and evidence[name] not in reasoning]
             raise GradeError("reasoning review requires verifiable CoT quotes and efficiency assessment; "
+                             + "nonliteral_fields=" + str(bad_quotes) + "; "
                              + json.dumps(evidence, ensure_ascii=False)[:600])
         grade["reasoning_evidence"] = evidence
     if response.get("_context_budget"):

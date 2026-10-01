@@ -6,6 +6,17 @@ import json
 import os
 import time
 import urllib.request
+import urllib.error
+import re
+
+
+class LLMRequestError(RuntimeError):
+    """Transport failure with enough information for provider-level recovery."""
+    def __init__(self, message, *, status_code=None, retryable=True, retry_after=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
+        self.retry_after = retry_after
 
 
 def client_config() -> dict:
@@ -132,7 +143,20 @@ def chat(
             last = e
             if attempt + 1 < retries:
                 time.sleep(2**attempt)
-    raise RuntimeError(f"LLM request failed after {retries} tries: {last}")
+    status = getattr(last, "code", None)
+    detail = str(last)
+    retry_after = None
+    if isinstance(last, urllib.error.HTTPError):
+        try:
+            detail += "; " + last.read(4000).decode("utf-8", errors="replace")
+            retry_after = float(last.headers.get("Retry-After", "0")) or None
+        except (OSError, TypeError, ValueError):
+            pass
+    detail = detail.replace(cfg["api_key"], "[REDACTED]")
+    detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[REDACTED]", detail)
+    raise LLMRequestError(f"LLM request failed after {retries} tries: {detail}",
+        status_code=status, retryable=status is None or status in {408, 409, 425, 429} or status >= 500,
+        retry_after=retry_after) from last
 
 
 def assistant_message(resp: dict) -> dict:

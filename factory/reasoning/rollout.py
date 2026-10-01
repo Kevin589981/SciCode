@@ -203,6 +203,19 @@ def _jsonl(path: Path) -> list[dict]:
     return list(_iter_jsonl(path))
 
 
+def trace_complete(trace: dict, *, require_both_channels: bool = False) -> bool:
+    if trace.get("finish_reason") != "stop" or trace.get("truncated"):
+        return False
+    if require_both_channels:
+        from .build_native_sft import normalize_channels
+        try:
+            reasoning, answer, _ = normalize_channels(trace["messages"][-1])
+            return bool(reasoning.strip() and answer.strip())
+        except (ValueError, KeyError, IndexError):
+            return False
+    return True
+
+
 def run_rollouts(
     tasks_path: Path,
     output_path: Path,
@@ -226,6 +239,7 @@ def run_rollouts(
     retry_incomplete: bool = False,
     progress_path: Path | None = None,
     on_trace_written: Callable | None = None,
+    require_both_channels: bool = False,
 ) -> dict:
     """Roll out admitted tasks with bounded concurrency and exact resume keys."""
     if attempts < 1 or concurrency < 1:
@@ -293,14 +307,12 @@ def run_rollouts(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     errors_path = errors_path or output_path.with_suffix(".errors.jsonl")
     latest = {
-        row.get("trace_id"): {"finish_reason": row.get("finish_reason"), "truncated": row.get("truncated")}
+        row.get("trace_id"): {"complete": trace_complete(row, require_both_channels=require_both_channels)}
         for row in (_iter_jsonl(output_path) if output_path.exists() else [])
     }
     done = {
         identity for identity, row in latest.items()
-        if not retry_incomplete or (
-            row.get("finish_reason") == "stop" and not row.get("truncated")
-        )
+        if not retry_incomplete or row["complete"]
     }
     jobs = []
     skipped = 0

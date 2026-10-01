@@ -99,13 +99,19 @@ def build(tasks_path: Path, traces_path: Path, out_dir: Path, *,
             identity = trace["trace_id"]
             previous = latest.get(identity)
             prompt_hash = canonical_hash(trace["messages"][:2])
+            # A stop marker without a final answer is not a completed target.
+            try:
+                r, a, _ = normalize_channels(trace["messages"][-1], repair_qwen=repair_qwen)
+                complete = trace.get("finish_reason") == "stop" and not trace.get("truncated") and bool(r.strip() and a.strip())
+            except ValueError:
+                complete = False
             if previous and (
                 previous["complete"] or previous["task_hash"] != trace["task_hash"]
                 or previous["prompt_hash"] != prompt_hash or previous["model"] != trace["model"]
             ):
                 raise ValueError(f"unsafe duplicate trace: {identity}")
             latest[identity] = {"offset": offset, "length": len(raw),
-                                "complete": trace.get("finish_reason") == "stop" and not trace.get("truncated"),
+                                "complete": complete,
                                 "task_hash": trace["task_hash"], "prompt_hash": prompt_hash,
                                 "model": trace["model"], "raw_sha256": hashlib.sha256(raw).hexdigest()}
     with output_path.open("wb") as output, (out_dir / "audit-candidates.jsonl").open("w", encoding="utf-8") as candidates, (out_dir / "excluded.jsonl").open("w", encoding="utf-8") as excluded:

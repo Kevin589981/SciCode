@@ -18,7 +18,7 @@ from ..author import llm
 from .batch import controller_lock
 from .build_native_sft import build
 from .prepare_reused_tasks import file_sha256, prepare, rows
-from .rollout import current_commit, run_rollouts, trace_id_for
+from .rollout import current_commit, run_rollouts, trace_id_for, trace_complete
 from .schema import canonical_hash, validate_task
 from .student_view import REUSED_PROMPT_POLICY, trace_student_prompt
 
@@ -154,7 +154,7 @@ def run(inputs: Path, output: Path, cfg: dict, *, chat_fn=llm.chat, on_trace_wri
                 trace_student_prompt(task, trace)
                 if trace["trace_id"] in completed:
                     raise ValueError("duplicate completed trace in output")
-                if trace.get("finish_reason") == "stop" and not trace.get("truncated"):
+                if trace_complete(trace, require_both_channels=True):
                     completed.add(trace["trace_id"])
         started = time.time()
         # Preserve every returned response BEFORE trace schema validation. A
@@ -179,6 +179,7 @@ def run(inputs: Path, output: Path, cfg: dict, *, chat_fn=llm.chat, on_trace_wri
                 run_variant=cfg["run_variant"], retry_incomplete=cfg["retry_incomplete"],
                 factory_commit=manifest["factory_commit"], progress_path=output / "progress.json",
                 on_trace_written=on_trace_written,
+                require_both_channels=True,
             )
         result.update({"fingerprint": manifest["fingerprint"], "elapsed_seconds": time.time() - started})
         dump(output / "last_run_report.json", result)

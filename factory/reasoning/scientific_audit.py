@@ -164,7 +164,12 @@ def _validate_checks(value: dict, plan: dict, answer: str) -> dict:
     if not isinstance(value.get("critical_issue"), str) or not isinstance(value.get("summary"), str):
         raise AuditError("missing summary or critical_issue")
     if any(item["status"] == "violated" for item in checks) and not value["critical_issue"].strip():
-        raise AuditError("violated requirement needs a critical_issue")
+        # Repair only a missing summary from the already validated explicit
+        # violation evidence. Never reinterpret a violation as satisfaction.
+        value["critical_issue"] = "Derived from violated checks: " + "; ".join(
+            item["id"] + ": " + item["probe_result"] + " — " + item["explanation"]
+            for item in checks if item["status"] == "violated")
+        value["critical_issue_repair"] = "missing-summary-derived-from-explicit-violations-v1"
     if not answer.strip() and any(item["status"] == "satisfied" for item in checks):
         raise AuditError("empty answer cannot satisfy a deliverable")
     return value

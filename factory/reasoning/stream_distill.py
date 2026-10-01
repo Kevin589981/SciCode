@@ -21,6 +21,9 @@ from .grade import judge_trace
 from .prepare_reused_tasks import rows
 from .review_client import reviewer_chat
 from .scientific_audit import POLICY as AUDIT_POLICY, audit_row
+from .resilient_client import ResilientClient
+from .review_cache import ReviewCache
+from .rollout import trace_complete
 
 POLICY = "deepseek-kimi-live-distillation-v1"
 
@@ -36,6 +39,7 @@ def previous_records(path, policy, model):
             if old and (old["row_sha256"] != row["row_sha256"] or not old["error"]):
                 raise ValueError("unsafe duplicate completed review")
             result[identity] = {"row_sha256": row["row_sha256"], "error": "error" in row,
+                                "error_detail": row.get("error", ""),
                                 "status": row.get("disposition", "reviewed")}
     return result
 
@@ -44,7 +48,7 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
              workers=500, context_window_tokens=262144, max_tokens=65536,
              timeout=2400, input_margin_tokens=4096, generation_passes=3,
              teacher_chat=llm.chat, review_chat=None, audit_fn=audit_row,
-             grade_fn=judge_trace) -> dict:
+             grade_fn=judge_trace, review_attempts=3) -> dict:
     if not 1 <= workers <= 2000 or generation_passes < 1:
         raise ValueError("invalid worker count / generation passes")
     if not 0 < max_tokens < context_window_tokens:
@@ -53,9 +57,12 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
         raise ValueError("teacher and reviewer must use the same context window")
     root.mkdir(parents=True, exist_ok=True)
     with controller_lock(root / "pipeline", exclusive=True):
-        native, reviewed = root / "native-v1", root / "reviewed-v1"
-        if native.exists() or reviewed.exists():
-            raise FileExistsError("native/reviewed export exists; resume explicit review/export stages")
+        export_version = 1
+        while (root / f"native-v{export_version}").exists() or (root / f"reviewed-v{export_version}").exists():
+            export_version += 1
+        if export_version > 1 and not (root / "pipeline_manifest.json").exists():
+            raise ValueError("existing exports lack a pipeline identity; refusing adoption")
+        native, reviewed = root / f"native-v{export_version}", root / f"reviewed-v{export_version}"
         manifest = validate_inputs(inputs, cfg)
         solver_manifest = output / "run_manifest.json"
         if solver_manifest.exists() and json.loads(solver_manifest.read_text(encoding="utf-8")).get("fingerprint") != manifest["fingerprint"]:
@@ -78,10 +85,23 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
                     "grade": previous_records(grade_path, REASONING_REVIEW_POLICY, client["model"])}
         # No global reviewer credentials: run() updates the teacher's env while
         # this explicit client stays immutable and private to review workers.
-        chat = review_chat or reviewer_chat(client, context_window_tokens=context_window_tokens,
-                                           input_margin_tokens=input_margin_tokens)
         jobs = queue.Queue(maxsize=manifest["selected"])
         results = queue.Queue()  # At most 2 short result records per selected task.
+        def provider_event(model):
+            return lambda record: results.put(("transport", {"model": model, **record}))
+        if teacher_chat is llm.chat:
+            teacher_client = {"base_url": cfg["base_url"], "model": cfg["model"],
+                              "api_key": os.environ["SCICODE_LLM_API_KEY"]}
+            def isolated_teacher(messages, **kwargs):
+                return llm.chat(messages, client=teacher_client, **kwargs)
+            teacher_transport = ResilientClient(isolated_teacher, emit=provider_event(cfg["model"]))
+            effective_teacher = teacher_transport
+        else:
+            teacher_transport = None
+            effective_teacher = teacher_chat
+        review_transport = ResilientClient(emit=provider_event(client["model"])) if review_chat is None else None
+        chat = review_chat or reviewer_chat(client, context_window_tokens=context_window_tokens,
+            input_margin_tokens=input_margin_tokens, chat_fn=review_transport)
         scheduled = set()
         state = {"stage": "generation_and_live_review", "selected": manifest["selected"],
                  "teacher_model": cfg["model"], "reviewer_model": client["model"],
@@ -104,8 +124,9 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
             try:
                 with audit_path.open("a", encoding="utf-8", newline="\n") as audits, \
                      grade_path.open("a", encoding="utf-8", newline="\n") as grades, \
-                     (root / "live-excluded.jsonl").open("a", encoding="utf-8") as excluded:
-                    sinks = {"audit": audits, "grade": grades, "excluded": excluded}
+                     (root / "live-excluded.jsonl").open("a", encoding="utf-8") as excluded, \
+                     (root / "transport-events.jsonl").open("a", encoding="utf-8") as transport:
+                    sinks = {"audit": audits, "grade": grades, "excluded": excluded, "transport": transport}
                     while True:
                         try:
                             event = results.get(timeout=10)
@@ -122,15 +143,18 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
                             with state_lock:
                                 if kind == "excluded":
                                     state["excluded_live"] += 1
-                                else:
+                                elif kind in {"audit", "grade"}:
                                     old = previous[kind].get(record["trace_id"])
                                     if old:
                                         state[kind + ("_errors" if old["error"] else "_completed")] -= 1
                                     state[kind + ("_errors" if "error" in record else "_completed")] += 1
                                     previous[kind][record["trace_id"]] = {
                                         "error": "error" in record, "row_sha256": record["row_sha256"],
+                                        "error_detail": record.get("error", ""),
                                         "status": record.get("disposition", "reviewed")}
                         with state_lock:
+                            state["teacher_provider"] = teacher_transport.snapshot() if teacher_transport else None
+                            state["review_provider"] = review_transport.snapshot() if review_transport else None
                             state["updated_at"] = time.time()
                             dump(root / "pipeline_progress.json", dict(state))
             except BaseException as exc:
@@ -147,6 +171,9 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
             payload = json.dumps(candidate, ensure_ascii=False).encode()
             digest = hashlib.sha256(payload).hexdigest()
             identity = candidate["trace_id"]
+            cache = ReviewCache(root / "review-cache", chat,
+                                {"model": client["model"], "base_url": client["base_url"],
+                                 "context": context_window_tokens, "margin": input_margin_tokens})
             for kind, policy in (("audit", AUDIT_POLICY), ("grade", REASONING_REVIEW_POLICY)):
                 old = previous[kind].get(identity)
                 if old:
@@ -154,30 +181,50 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
                         raise ValueError("live candidate changed since review")
                     if not old["error"]:
                         continue
-                record = {"policy": policy, "model": client["model"],
-                          "trace_id": identity, "row_sha256": digest,
-                          "context_window_tokens": context_window_tokens, "context_calls": []}
-                captured = {}
-                def captured_chat(messages, **kwargs):
-                    response = chat(messages, **kwargs)
-                    captured["response"] = response
-                    if response.get("_context_budget"):
-                        record["context_calls"].append(response["_context_budget"])
-                    return response
-                try:
-                    if kind == "audit":
-                        record.update(audit_fn(candidate, chat_fn=captured_chat, model=client["model"],
-                                               max_tokens=max_tokens, timeout=timeout,
-                                               max_input_chars=2_000_000))
-                    else:
-                        record["grade"] = grade_fn(task, candidate, chat_fn=captured_chat,
-                            model=client["model"], max_tokens=max_tokens, timeout=timeout,
-                            max_input_chars=2_000_000, require_reasoning_evidence=True)
-                except Exception as exc:
-                    record["error"] = f"{type(exc).__name__}: {exc}"[:1500]
-                if kind == "grade" and captured:
-                    record["review_response"] = captured["response"]
-                results.put((kind, record))
+                feedback = old.get("error_detail", "") if old and kind == "grade" and old.get("error_detail", "").startswith("GradeError") else ""
+                failed_call = 1 if feedback else None
+                for review_attempt in range(review_attempts):
+                    record = {"policy": policy, "model": client["model"],
+                              "trace_id": identity, "row_sha256": digest,
+                              "context_window_tokens": context_window_tokens, "context_calls": [],
+                              "review_attempt": review_attempt}
+                    captured, call_count = {}, 0
+                    def captured_chat(messages, **kwargs):
+                        nonlocal call_count
+                        call_count += 1
+                        if feedback and call_count == failed_call:
+                            messages = [dict(m) for m in messages]
+                            messages[-1]["content"] += (
+                                "\nPREVIOUS RESPONSE FAILED MACHINE VALIDATION: " + feedback[:1600]
+                                + "\nReturn a new complete JSON object. Preserve a substantive judgment, "
+                                "not merely a favorable score. Quotes MUST be short exact contiguous "
+                                "substrings of the original reasoning, never paraphrases or quotes "
+                                "from the final answer. Do not insert ellipses or reformat text.")
+                        response = cache(messages, **kwargs)
+                        captured["response"] = response
+                        if response.get("_context_budget"):
+                            record["context_calls"].append(response["_context_budget"])
+                        return response
+                    try:
+                        if kind == "audit":
+                            record.update(audit_fn(candidate, chat_fn=captured_chat, model=client["model"],
+                                                   max_tokens=max_tokens, timeout=timeout,
+                                                   max_input_chars=2_000_000))
+                        else:
+                            record["grade"] = grade_fn(task, candidate, chat_fn=captured_chat,
+                                model=client["model"], max_tokens=max_tokens, timeout=timeout,
+                                max_input_chars=2_000_000, require_reasoning_evidence=True)
+                    except Exception as exc:
+                        record["error"] = f"{type(exc).__name__}: {exc}"[:1500]
+                        if not isinstance(exc, llm.LLMRequestError):
+                            cache.reject_last(exc)
+                            feedback, failed_call = str(exc), call_count
+                    if captured:
+                        record["review_response"] = captured["response"]
+                    record["review_cache_calls"] = list(cache.calls)
+                    results.put((kind, record))
+                    if "error" not in record or (review_transport and review_transport.fatal):
+                        break
 
         def consumer():
             while True:
@@ -202,7 +249,7 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
             with traces_path.open("rb") as stream:
                 stream.seek(offset)
                 trace = json.loads(stream.read(length))
-            if trace.get("finish_reason") != "stop" or trace.get("truncated"):
+            if not trace_complete(trace, require_both_channels=True):
                 return  # A later complete retry may still be reviewed.
             identity = trace["trace_id"]
             if identity in scheduled:
@@ -225,7 +272,7 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
                             enqueue(stream.tell() - len(raw), len(raw))
                 for generation_pass in range(1, generation_passes + 1):
                     update(generation_pass=generation_pass)
-                    report = run(inputs, output, cfg, chat_fn=teacher_chat, on_trace_written=enqueue)
+                    report = run(inputs, output, cfg, chat_fn=effective_teacher, on_trace_written=enqueue)
                     reports.append(report)
                     dump(root / "generation_passes.json", {"reports": reports})
                     if not report.get("errors") and len(scheduled) == manifest["selected"]:
@@ -252,9 +299,13 @@ def pipeline(inputs: Path, output: Path, root: Path, cfg: dict, client: dict, *,
         selection = select_reviewed(native, audit_path, reviewed, client["model"], grades_path=grade_path)
         report = {"generation": reports, "export": export_report, "selection": selection,
                   "selected": manifest["selected"], "review_workers": workers,
+                  "export_version": export_version,
+                  "latest_sft": str((reviewed / "sft.jsonl").resolve()),
+                  "fatal_provider_error": bool((teacher_transport and teacher_transport.fatal) or (review_transport and review_transport.fatal)),
+                  "audit_errors": state["audit_errors"], "grade_errors": state["grade_errors"],
                   "missing_complete_generations": manifest["selected"] - len(scheduled)}
         dump(root / "pipeline_report.json", report)
-        update(stage="completed" if not report["missing_complete_generations"] else "completed_with_missing_generations",
+        update(stage="completed" if not any(report[k] for k in ("missing_complete_generations", "audit_errors", "grade_errors")) else "needs_retry",
                final_counts=selection["counts"], finished_at=time.time())
         dump(root / "pipeline_progress.json", state)
         return report
@@ -270,16 +321,32 @@ def main():
     parser.add_argument("--max-tokens", type=int, default=65536)
     parser.add_argument("--reviewer", default="Kimi-K3")
     parser.add_argument("--timeout", type=int, default=2400)
+    parser.add_argument("--recovery-rounds", type=int, default=3)
     args = parser.parse_args()
     client = {"base_url": os.environ["SCICODE_REVIEW_BASE_URL"],
               "api_key": os.environ["SCICODE_REVIEW_API_KEY"], "model": args.reviewer}
     host = urlparse(client["base_url"]).hostname
     os.environ["NO_PROXY"] = str(host) + "," + os.environ.get("NO_PROXY", "")
     os.environ["no_proxy"] = os.environ["NO_PROXY"]
-    print(json.dumps(pipeline(args.inputs, args.output, args.root, load_config(args.config), client,
-        workers=args.workers, context_window_tokens=args.context_window_tokens,
-        max_tokens=args.max_tokens, timeout=args.timeout, input_margin_tokens=args.input_margin_tokens),
-        ensure_ascii=False, indent=2))
+    if args.recovery_rounds < 1:
+        raise ValueError("recovery rounds must be positive")
+    for recovery_round in range(1, args.recovery_rounds + 1):
+        print(json.dumps({"event": "pipeline_round_started", "recovery_round": recovery_round,
+                          "teacher": load_config(args.config)["model"], "reviewer": args.reviewer,
+                          "workers": args.workers, "context_window_tokens": args.context_window_tokens}), flush=True)
+        report = pipeline(args.inputs, args.output, args.root, load_config(args.config), client,
+            workers=args.workers, context_window_tokens=args.context_window_tokens,
+            max_tokens=args.max_tokens, timeout=args.timeout, input_margin_tokens=args.input_margin_tokens)
+        print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+        incomplete = any(report[k] for k in ("missing_complete_generations", "audit_errors", "grade_errors"))
+        if not incomplete:
+            return
+        if report["fatal_provider_error"]:
+            raise SystemExit(2)
+        if recovery_round < args.recovery_rounds:
+            print("Incomplete work retained: retry only missing/error rows after 30s; prior exports preserved", flush=True)
+            time.sleep(30)
+    raise SystemExit(2)
 
 
 if __name__ == "__main__":
