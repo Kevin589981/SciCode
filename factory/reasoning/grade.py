@@ -183,13 +183,16 @@ def judge_trace(
     model = model or llm.client_config()["model"]
     prompt = _judge_prompt(task, trace)
     if require_reasoning_evidence:
+        prompt = prompt.replace('"scores": {', '"reasoning_evidence": {"useful_quote": "exact contiguous CoT quote, at least 32 characters", "redundant_quote": "exact CoT quote or empty string", "efficiency": "efficient|productive_but_long|repetitive|uncertain", "explanation": "specific evidence"},\n  "scores": {', 1)
         prompt += """\nADDITIONAL CoT EVIDENCE CONTRACT:
 Do not infer reasoning quality merely from a correct final answer. Add a
-reasoning_evidence object to the JSON with useful_quote (one exact nonempty
-substring of reasoning_content), redundant_quote (one exact substring, or an
+TOP-LEVEL reasoning_evidence object to the JSON with useful_quote (one exact
+contiguous substring of reasoning_content of at least 32 characters; if the
+entire reasoning is shorter, quote it in full), redundant_quote (one exact substring, or an
 empty string if none), efficiency (efficient|productive_but_long|repetitive|uncertain),
 and explanation (specific reasoning about useful progress versus repetition).
-Quote the actual reasoning channel, not the final answer. Extensive genuine
+Do not insert ellipses, paraphrase or reformat your quote. Quote the actual
+reasoning channel, not the final answer. Extensive genuine
 exploration can be productive_but_long; circular repetition is not deep thought.
 """
     if len(prompt) > max_input_chars:
@@ -250,7 +253,8 @@ exploration can be productive_but_long; circular repetition is not deep thought.
             or (evidence["redundant_quote"] and evidence["redundant_quote"] not in reasoning)
             or evidence.get("efficiency") not in {"efficient", "productive_but_long", "repetitive", "uncertain"}
             or not isinstance(evidence.get("explanation"), str) or not evidence["explanation"].strip()):
-            raise GradeError("reasoning review requires verifiable CoT quotes and efficiency assessment")
+            raise GradeError("reasoning review requires verifiable CoT quotes and efficiency assessment; "
+                             + json.dumps(evidence, ensure_ascii=False)[:600])
         grade["reasoning_evidence"] = evidence
     try:
         return validate_grade(grade, trace)

@@ -149,8 +149,9 @@ chat template、loss mask、截断和 packing 配置；教师响应数相同不�
 - 第一道 diagnose_revise：25696 reasoning tokens + 2550 final text tokens，
   用时 148.196 秒；第二道 compare_justify：53321 + 4552，用时 297.536 秒。
   这是服务端 API 的计数，不是 Qwen 学生 token。
-- 两道都有 Python fence。第一道两个 fence 中一个可被 ast.parse 解析，另一个
-  需检查是否为示意片段；第二道两个 fence 都可解析。没有执行这些生成代码。
+- 两道都有 Python fence。第一道主实现可被 ast.parse 解析，另一个为带 `>>>`
+  的 REPL 输入/输出示例（标签更适合 pycon）；第二道两个 fence 都可解析。
+  没有执行这些生成代码，保留原始响应，不把示例片段当成主实现语法错误。
 - 第一条还用同一 DeepSeek 做过一次诊断性 thinking 评分，JSON 能通过旧评分
   schema，但该自评不是独立科学审核，也不满足后来新增的引文证据门槛。
 - 科学审核与双通道 release 路径有离线端到端测试；尚未对这两条正式执行 Kimi

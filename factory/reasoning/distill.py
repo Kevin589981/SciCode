@@ -245,6 +245,11 @@ def grade_reasoning(inputs: Path, native: Path, output: Path, reviewer: str,
             offset, length, identity, digest = job
             result = {"policy": REASONING_REVIEW_POLICY, "model": reviewer,
                       "trace_id": identity, "row_sha256": digest}
+            captured = {}
+            def review_chat(messages, **kwargs):
+                response = chat_fn(messages, **kwargs)
+                captured["response"] = response
+                return response
             try:
                 with source_path.open("rb") as stream:
                     stream.seek(offset)
@@ -254,10 +259,12 @@ def grade_reasoning(inputs: Path, native: Path, output: Path, reviewer: str,
                 trace = json.loads(raw)
                 result["grade"] = judge_trace(tasks[trace["task_id"]], trace, model=reviewer,
                                               max_tokens=max_tokens, timeout=timeout,
-                                              max_input_chars=750000, chat_fn=chat_fn,
+                                              max_input_chars=750000, chat_fn=review_chat,
                                               require_reasoning_evidence=True)
             except Exception as exc:
                 result["error"] = f"{type(exc).__name__}: {exc}"[:1000]
+            if captured:
+                result["review_response"] = captured["response"]
             return result
 
         with output.open("a", encoding="utf-8") as sink, futures.ThreadPoolExecutor(max_workers=workers) as pool:
