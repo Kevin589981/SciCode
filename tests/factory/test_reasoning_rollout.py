@@ -3,7 +3,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from factory.reasoning.rollout import collect_trace, run_rollouts, trace_id_for
+from factory.reasoning.rollout import (
+    REUSED_PROMPT_POLICY,
+    collect_trace,
+    run_rollouts,
+    trace_id_for,
+)
 from factory.reasoning.preflight import PREFLIGHT_POLICY
 from factory.reasoning.schema import canonical_hash, validate_trace
 from tests.factory_fixtures import task_for
@@ -30,6 +35,33 @@ def response():
 
 
 class ReasoningRolloutTests(unittest.TestCase):
+    def test_reused_prompt_is_exact_and_has_distinct_provenance(self):
+        task = task_for()
+        old_prompt = [
+            {"role": "system", "content": "old audited system"},
+            {"role": "user", "content": "old audited question"},
+        ]
+        captured = []
+
+        def fake_chat(messages, **_kwargs):
+            captured.extend(messages)
+            return response()
+
+        trace = collect_trace(
+            task, chat_fn=fake_chat, model="Qwen3.5-35B-A3B",
+            prompt_messages=old_prompt,
+        )
+        self.assertEqual(captured, old_prompt)
+        self.assertEqual(trace["messages"][:2], old_prompt)
+        self.assertEqual(
+            trace["provenance"]["student_view_policy"], REUSED_PROMPT_POLICY
+        )
+        self.assertNotEqual(
+            trace["provenance"]["student_view_hash"],
+            canonical_hash(task),
+        )
+        self.assertEqual(trace["messages"][-1]["reasoning_content"], THINKING)
+
     def test_stale_visible_prompt_admission_cannot_start_solver(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

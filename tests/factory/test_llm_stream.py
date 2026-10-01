@@ -60,7 +60,7 @@ class StreamingLLMTests(unittest.TestCase):
         ) as call:
             result = llm.chat([{"role": "user", "content": "test"}], timeout=7200)
         self.assertTrue(json.loads(call.call_args.args[0].data)["stream"])
-        self.assertEqual(call.call_args.kwargs["timeout"], 600)
+        self.assertEqual(call.call_args.kwargs["timeout"], 7200)
         self.assertEqual(
             result["choices"][0]["message"]["reasoning_content"], "derive then check"
         )

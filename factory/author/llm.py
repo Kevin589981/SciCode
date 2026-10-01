@@ -111,9 +111,10 @@ def chat(
                     "Authorization": f"Bearer {cfg['api_key']}",
                 },
             )
-            # urllib's timeout applies to each blocking read. SSE permits long
-            # reasoning while a silent socket still fails within ten minutes.
-            with urllib.request.urlopen(req, timeout=min(timeout, 600)) as resp:
+            # urllib's timeout applies to each blocking read. Respect the
+            # caller's idle timeout: a heavily loaded reasoning service may
+            # pause longer than ten minutes before its first SSE chunk.
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 if "text/event-stream" in resp.headers.get("Content-Type", ""):
                     return _stream_response(resp, allow_partial=allow_partial)
                 return json.loads(resp.read().decode())

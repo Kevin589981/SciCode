@@ -7,6 +7,7 @@ import json
 from .schema import canonical_hash, validate_task
 
 STUDENT_VIEW_POLICY = "student-visible-v3"
+REUSED_PROMPT_POLICY = "audited-sft-prompt-v1"
 
 ARCHETYPE_LABELS = {
     "derive_implement": "derive and implement",
@@ -90,3 +91,39 @@ def student_view_hash(task: dict) -> str:
     return canonical_hash(
         {"policy_version": STUDENT_VIEW_POLICY, "user": render_student_user(task)}
     )
+
+
+def trace_student_prompt(task: dict, trace: dict) -> str:
+    """Verify the exact prompt a solver saw and return its user message."""
+    task = validate_task(task)
+    messages = trace.get("messages") or []
+    provenance = trace.get("provenance") or {}
+    policy = provenance.get("student_view_policy")
+    if policy == STUDENT_VIEW_POLICY:
+        expected_user = render_student_user(task)
+        expected_hash = student_view_hash(task)
+        if not any(
+            msg.get("role") == "user" and msg.get("content") == expected_user
+            for msg in messages
+        ):
+            raise ValueError("trace does not contain the current task prompt")
+    elif policy == REUSED_PROMPT_POLICY:
+        prompt = messages[:2]
+        if (
+            len(prompt) != 2
+            or [msg.get("role") for msg in prompt] != ["system", "user"]
+            or any(not isinstance(msg.get("content"), str) for msg in prompt)
+        ):
+            raise ValueError("trace does not contain the reused system/user prompt")
+        expected_user = prompt[1]["content"]
+        if task["problem"]["question"] not in expected_user:
+            raise ValueError("reused prompt does not contain the task question")
+        expected_hash = canonical_hash({
+            "policy_version": REUSED_PROMPT_POLICY,
+            "messages": prompt,
+        })
+    else:
+        raise ValueError(f"unsupported student prompt policy: {policy}")
+    if provenance.get("student_view_hash") != expected_hash:
+        raise ValueError("trace has a stale or mismatched student prompt hash")
+    return expected_user

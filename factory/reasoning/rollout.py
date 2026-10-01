@@ -15,7 +15,12 @@ from pathlib import Path
 from ..author import llm
 from .preflight import PREFLIGHT_POLICY
 from .schema import TRACE_SCHEMA, canonical_hash, validate_task, validate_trace
-from .student_view import STUDENT_VIEW_POLICY, render_student_user, student_view_hash
+from .student_view import (
+    REUSED_PROMPT_POLICY,
+    STUDENT_VIEW_POLICY,
+    render_student_user,
+    student_view_hash,
+)
 from .verify import VERIFICATION_POLICY
 
 
@@ -84,11 +89,31 @@ def collect_trace(
     task_set_hash: str = "unknown",
     run_variant: str | None = None,
     outcome_fn: Callable[[dict, dict], dict] | None = None,
+    prompt_messages: list[dict] | None = None,
 ) -> dict:
     """Collect one trace; an auxiliary checker can never erase the raw response."""
     task = validate_task(task)
     model = model or llm.client_config()["model"]
-    messages = solver_messages(task)
+    if prompt_messages is None:
+        messages = solver_messages(task)
+        prompt_hash = student_view_hash(task)
+        prompt_policy = STUDENT_VIEW_POLICY
+    else:
+        if (
+            len(prompt_messages) != 2
+            or [item.get("role") for item in prompt_messages] != ["system", "user"]
+            or any(not isinstance(item.get("content"), str) for item in prompt_messages)
+        ):
+            raise RolloutError("reused prompt must contain system and user text")
+        messages = [
+            {"role": item["role"], "content": item["content"]}
+            for item in prompt_messages
+        ]
+        prompt_policy = REUSED_PROMPT_POLICY
+        prompt_hash = canonical_hash({
+            "policy_version": prompt_policy,
+            "messages": messages,
+        })
     started = time.monotonic()
     response = chat_fn(
         messages,
@@ -149,8 +174,8 @@ def collect_trace(
             "factory_commit": factory_commit or current_commit(),
             "task_set_hash": task_set_hash,
             "source_commit": task["source"]["commit"],
-            "student_view_hash": student_view_hash(task),
-            "student_view_policy": STUDENT_VIEW_POLICY,
+            "student_view_hash": prompt_hash,
+            "student_view_policy": prompt_policy,
             "run_variant": run_variant or "default",
         },
     }
@@ -195,11 +220,22 @@ def run_rollouts(
     run_variant: str | None = None,
     outcome_fn: Callable[[dict, dict], dict] | None = None,
     errors_path: Path | None = None,
+    prompts_path: Path | None = None,
 ) -> dict:
     """Roll out admitted tasks with bounded concurrency and exact resume keys."""
     if attempts < 1 or concurrency < 1:
         raise RolloutError("attempts and concurrency must be positive")
     tasks = [validate_task(row) for row in _jsonl(Path(tasks_path))]
+    prompts = {}
+    if prompts_path is not None:
+        for row in _jsonl(Path(prompts_path)):
+            task_hash = row.get("task_hash")
+            if not isinstance(task_hash, str) or task_hash in prompts:
+                raise RolloutError("reused prompts require unique task_hash values")
+            prompts[task_hash] = row.get("messages")
+        task_hashes = {canonical_hash(task) for task in tasks}
+        if set(prompts) != task_hashes:
+            raise RolloutError("reused prompts must match the task set exactly")
     task_views = {canonical_hash(task): student_view_hash(task) for task in tasks}
     model = model or llm.client_config()["model"]
     admission_sets = []
@@ -284,6 +320,7 @@ def run_rollouts(
             task_set_hash=task_set_hash,
             run_variant=run_variant,
             outcome_fn=outcome_fn,
+            prompt_messages=prompts.get(canonical_hash(task)) if prompts_path else None,
         )
 
     with output_path.open("a", encoding="utf-8") as output, Path(errors_path).open(
@@ -322,6 +359,7 @@ def main() -> None:
     parser.add_argument("--tasks", type=Path, required=True)
     parser.add_argument("--preflight", type=Path)
     parser.add_argument("--verification", type=Path)
+    parser.add_argument("--prompts", type=Path)
     parser.add_argument("--preflight-model")
     parser.add_argument("--verifier-model")
     parser.add_argument("--out", type=Path, required=True)
@@ -338,6 +376,7 @@ def main() -> None:
         args.out,
         preflight_path=args.preflight,
         verification_path=args.verification,
+        prompts_path=args.prompts,
         preflight_model=args.preflight_model,
         verifier_model=args.verifier_model,
         model=args.model,

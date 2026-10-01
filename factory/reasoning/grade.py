@@ -17,7 +17,7 @@ from .schema import (
     validate_task,
     validate_trace,
 )
-from .student_view import STUDENT_VIEW_POLICY, render_student_user, student_view_hash
+from .student_view import trace_student_prompt
 
 
 class GradeError(ValueError):
@@ -101,7 +101,7 @@ selection rule. Long text is not inherently valuable: penalize repetition,
 unsupported claims, dead loops, and confidently wrong scientific premises.
 
 STUDENT-VISIBLE TASK (the only task information available to the solver):
-{render_student_user(task)}
+{trace_student_prompt(task, trace)}
 
 RECORDED TRACE (which may end before the final answer):
 {json.dumps(trace_view, ensure_ascii=False, indent=2)}
@@ -175,15 +175,10 @@ def judge_trace(
     trace = validate_trace(trace)
     if trace["task_id"] != task["task_id"] or trace["task_hash"] != canonical_hash(task):
         raise GradeError("trace does not match task content")
-    provenance = trace.get("provenance") or {}
-    if (provenance.get("student_view_hash") != student_view_hash(task)
-        or provenance.get("student_view_policy") != STUDENT_VIEW_POLICY):
-        raise GradeError("trace was not generated under the current student-visible prompt")
-    if not any(
-        message.get('role') == 'user' and message.get('content') == render_student_user(task)
-        for message in trace['messages']
-    ):
-        raise GradeError("trace does not contain the current student-visible prompt")
+    try:
+        trace_student_prompt(task, trace)
+    except ValueError as exc:
+        raise GradeError(str(exc)) from exc
     model = model or llm.client_config()["model"]
     prompt = _judge_prompt(task, trace)
     if len(prompt) > max_input_chars:
