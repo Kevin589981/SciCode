@@ -86,6 +86,7 @@ def chat(
     retries: int = 3,
     timeout: int = 900,
     allow_partial: bool = False,
+    extra_body: dict | None = None,
 ) -> dict:
     """Return a complete response, or a marked partial solver response."""
     cfg = client_config()
@@ -98,6 +99,10 @@ def chat(
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if extra_body:
+        if set(extra_body) - {"thinking", "reasoning_effort"}:
+            raise ValueError("unsupported provider options; cannot override core request fields")
+        payload.update(extra_body)
     body = json.dumps(payload).encode()
     last = None
     for attempt in range(retries):

@@ -9,6 +9,7 @@ import os
 import time
 import hashlib
 import concurrent.futures as futures
+import threading
 from collections import Counter
 from pathlib import Path
 from urllib.parse import urlparse
@@ -34,12 +35,18 @@ def load_config(path: Path) -> dict:
     cfg = json.loads(path.read_text(encoding="utf-8"))
     allowed = {"model", "base_url", "teacher_revision", "temperature", "max_tokens",
                "context_window_tokens", "input_margin_tokens", "timeout", "concurrency",
-               "service_capacity", "attempts", "run_variant", "retry_incomplete"}
+               "service_capacity", "attempts", "run_variant", "retry_incomplete", "request_options"}
     if set(cfg) - allowed:
         raise ValueError(f"unknown/secret config fields: {sorted(set(cfg) - allowed)}")
     cfg.setdefault("attempts", 1)
     cfg.setdefault("retry_incomplete", True)
     cfg.setdefault("input_margin_tokens", 4096)
+    cfg.setdefault("request_options", {})
+    options = cfg["request_options"]
+    if (not isinstance(options, dict) or set(options) - {"thinking", "reasoning_effort"}
+        or ("thinking" in options and options["thinking"] != {"type": "enabled"})
+        or ("reasoning_effort" in options and options["reasoning_effort"] not in {"low", "high", "max"})):
+        raise ValueError("invalid reasoning provider options; only enabled thinking is supported")
     cfg["base_url"] = cfg["base_url"].rstrip("/")
     parsed = urlparse(cfg["base_url"])
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -149,14 +156,28 @@ def run(inputs: Path, output: Path, cfg: dict, *, chat_fn=llm.chat) -> dict:
                 if trace.get("finish_reason") == "stop" and not trace.get("truncated"):
                     completed.add(trace["trace_id"])
         started = time.time()
-        result = run_rollouts(
-            inputs / "tasks.jsonl", traces, prompts_path=inputs / "prompts.jsonl",
-            chat_fn=chat_fn, model=cfg["model"], attempts=cfg["attempts"],
-            temperature=cfg["temperature"], max_tokens=cfg["max_tokens"],
-            timeout=cfg["timeout"], concurrency=cfg["concurrency"],
-            run_variant=cfg["run_variant"], retry_incomplete=cfg["retry_incomplete"],
-            factory_commit=manifest["factory_commit"], progress_path=output / "progress.json",
-        )
+        # Preserve every returned response BEFORE trace schema validation. A
+        # proxy that drops thinking must not silently erase the final answer.
+        raw_lock = threading.Lock()
+        with (output / "raw-responses.jsonl").open("a", encoding="utf-8") as raw_sink:
+            def preserved_chat(messages, **kwargs):
+                if cfg.get("request_options"):
+                    kwargs["extra_body"] = cfg["request_options"]
+                response = chat_fn(messages, **kwargs)
+                record = {"model": cfg["model"], "run_fingerprint": manifest["fingerprint"],
+                          "messages": messages, "response": response, "received_at": time.time()}
+                with raw_lock:
+                    raw_sink.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    raw_sink.flush()
+                return response
+            result = run_rollouts(
+                inputs / "tasks.jsonl", traces, prompts_path=inputs / "prompts.jsonl",
+                chat_fn=preserved_chat, model=cfg["model"], attempts=cfg["attempts"],
+                temperature=cfg["temperature"], max_tokens=cfg["max_tokens"],
+                timeout=cfg["timeout"], concurrency=cfg["concurrency"],
+                run_variant=cfg["run_variant"], retry_incomplete=cfg["retry_incomplete"],
+                factory_commit=manifest["factory_commit"], progress_path=output / "progress.json",
+            )
         result.update({"fingerprint": manifest["fingerprint"], "elapsed_seconds": time.time() - started})
         dump(output / "last_run_report.json", result)
         return result
@@ -168,6 +189,8 @@ def export(inputs: Path, output: Path, out_dir: Path) -> dict:
         for name, digest in manifest["input_sha256"].items():
             if file_sha256(inputs / name) != digest:
                 raise ValueError("inputs changed since generation")
+        if not (output / "traces.jsonl").exists() or not (output / "traces.jsonl").stat().st_size:
+            raise ValueError("no valid traces to export; inspect request errors/raw-responses first")
         return build(inputs / "tasks.jsonl", output / "traces.jsonl", out_dir,
                      policy=POLICY, expected_teacher=manifest["generation"]["model"],
                      repair_qwen=False, source_index_path=inputs / "source_index.jsonl",

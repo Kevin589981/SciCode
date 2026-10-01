@@ -288,3 +288,17 @@ def test_concurrent_same_output_is_rejected_before_requests(tmp_path):
     with controller_lock(output / "run", exclusive=True):
         with pytest.raises(RuntimeError, match="another controller"):
             run(prepared, output, config(), chat_fn=lambda *_a, **_k: pytest.fail("must not call"))
+
+
+def test_provider_thinking_options_and_raw_backup(tmp_path):
+    prepared, _ = inputs(tmp_path)
+    cfg = config()
+    cfg["request_options"] = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+    def chat(_messages, **kwargs):
+        assert kwargs["extra_body"] == cfg["request_options"]
+        return response(reasoning="", answer="final without thinking")
+    output = tmp_path / "solver"
+    assert run(prepared, output, cfg, chat_fn=chat)["errors"] == 1
+    assert list(rows(output / "raw-responses.jsonl"))[0]["response"]["choices"][0]["message"]["content"] == "final without thinking"
+    with pytest.raises(ValueError, match="no valid traces"):
+        export(prepared, output, tmp_path / "native")

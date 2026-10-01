@@ -21,6 +21,11 @@ Qwen 基线分支保持不动；本分支独立运行，不修改历史 4586 条
 ```
 
 默认模型 `DeepSeek-V4-Flash-0731`，端点 `http://10.100.184.69:4000/v1`。
+请求显式加入 `thinking: {type: enabled}` 和 `reasoning_effort: high`。真实调试发现
+仅换模型名称时内部端点未返回 reasoning_content；不能假定代理继承官方默认。
+参数依据 [DeepSeek 官方思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode/)。
+官方说明思考模式下 temperature 不生效，因此 0.7 只记录为请求值，不能宣称教师
+采样温度与 Qwen 完全等效。当前 high 为显式基线，可在新运行目录另试 max。
 默认 500 并行，本程序配置硬上限 2000。此为本批次请求上限，不是服务端全局
 余量探测；其他客户端占用并发时需要留余量。线程池 pending 队列有界，主线程
 负责 JSONL 和进度写入，不走 SQLite。单输出目录有排他锁，不能被两进程并写。
@@ -92,6 +97,9 @@ bash factory/reasoning/run_4586_deepseek_reuse.sh run
 - `solver/traces.jsonl`：原始 thinking 与 content 分字段保存，含终止原因、usage、
   模型、请求参数、可见题面哈希。重试追加，不覆盖旧原始 trace。
 - `solver/traces.errors.jsonl`：历史请求错误事件，不是尚缺样本的实时数量。
+- `solver/raw-responses.jsonl`：校验前保存的实际请求消息与已聚合服务响应，写入
+  有线程锁。即使服务漏掉 thinking 导致 trace 校验失败，返回的答案仍可追溯。
+  不含密钥或请求头；完全无有效 trace 时 export 拒绝生成看似成功的空数据集。
 - `solver/run_manifest.json`：无密钥的不可变输入与生成身份，改变题面/预算/模型/
   温度/代码版本等不得复用旧输出。并发可调整，不改变训练样本的生成身份。
 - `solver/progress.json`：原子写入的当前轮 written/errors/skipped/total_jobs；

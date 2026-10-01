@@ -90,6 +90,17 @@ class StreamingLLMTests(unittest.TestCase):
         result = llm._stream_response(FakeResponse(body), allow_partial=False)
         self.assertEqual(result["choices"][0]["finish_reason"], "stop")
 
+    def test_deepseek_thinking_options_are_sent_in_the_actual_json_body(self):
+        body = event({"reasoning_content": "derive", "content": "answer"}) + event(finish_reason="stop")
+        with patch.dict(os.environ, {
+            "SCICODE_LLM_BASE_URL": "http://example.test/v1", "SCICODE_LLM_API_KEY": "dummy",
+            "SCICODE_LLM_MODEL": "DeepSeek-V4-Flash-0731",
+        }), patch.object(llm.urllib.request, "urlopen", return_value=FakeResponse(body)) as call:
+            llm.chat([], extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"})
+        payload = json.loads(call.call_args.args[0].data)
+        self.assertEqual(payload["thinking"], {"type": "enabled"})
+        self.assertEqual(payload["reasoning_effort"], "high")
+
 
 if __name__ == "__main__":
     unittest.main()
