@@ -256,6 +256,8 @@ exploration can be productive_but_long; circular repetition is not deep thought.
             raise GradeError("reasoning review requires verifiable CoT quotes and efficiency assessment; "
                              + json.dumps(evidence, ensure_ascii=False)[:600])
         grade["reasoning_evidence"] = evidence
+    if response.get("_context_budget"):
+        grade["judge"]["context_budget"] = response["_context_budget"]
     try:
         return validate_grade(grade, trace)
     except SchemaError as exc:

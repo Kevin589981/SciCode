@@ -1,6 +1,8 @@
 # DeepSeek 同题蒸馏：运行与验收
 
-正式批量合成必须等待用户验收。当前只允许准备输入、离线测试和少量接口调试。
+2026-10-01 用户已批准正式启动：生成 500 并发、审核共享 500 并发、两端 262144
+总上下文。Kimi 审核端点已迁移至 `http://10.100.184.69:4000/v1`，与教师同网关
+但使用不同密钥；密钥只由运行环境传入。批准范围是合成和审核，不包括 SFT 训练。
 Qwen 基线分支保持不动；本分支独立运行，不修改历史 4586 条数据。
 
 ## 入口与产物
@@ -14,9 +16,8 @@ Qwen 基线分支保持不动；本分支独立运行，不修改历史 4586 条
   → prepare：原题、精确 system/user、来源与 SHA256
   → validate：身份/哈希/上下文预算，不发请求
   → run：DeepSeek 重新解题，不传旧 assistant
-  → export：原生 thinking + 最终答案；另存审核输入
-  → audit：科学答案审核（旧审核不继承）
-  → grade：完整 thinking 的学习价值审核
+  → 每条完整 trace flush 后立刻排队：audit 科学答案 → grade 完整 thinking
+  → export：收尾时导出原生 thinking + 最终答案；候选与在线审核逐字/哈希一致
   → select：五类完整记录 + 双重审核支持的 sft.jsonl
 ```
 
@@ -38,6 +39,17 @@ HTTP 超时是每次阻塞读的 idle timeout，不是整个请求的总时长�
 密钥仅由环境变量传入，不放进配置/脚本/manifest。审核模型默认单个 Kimi-K3，
 同一模型分角色调用，不要求人工审核或多模型投票。审核单独用
 `SCICODE_REVIEW_BASE_URL` / `SCICODE_REVIEW_API_KEY`，不隐式复用解题服务。
+生成与审核同时运行，review client 显式持有自己的配置，不依赖生成线程修改的
+全局环境变量。生成最多 500 个请求、审核全部角色共享最多 500 个请求；单条样本
+依次做科学审核与 thinking 审核，但不等待其他题生成。队列仅保存 trace 文件
+offset/length，JSONL 审核结果及进度由一个 writer 写入，无 SQLite 多写竞争。
+
+审核同样设置 262144 总预算、4096 模板余量，最大输出请求默认 65536。每次调用
+完整保留输入，根据网关 `/utils/token_counter` 返回值调整剩余输出预算。实际
+网关标注 `openai_tokenizer`，因此必须视为估计而非 Kimi tokenizer 认证；记录
+estimate_policy、estimated_input_tokens、effective_max_tokens 和实际 usage。
+计数接口异常时回退 UTF-8 字节保守估计；放不下则记录 error，不静默截断 CoT。
+若 API 实际报告的输入+输出超过 262144，该审核不能通过。
 
 ## 无模型请求的准备/验收
 
@@ -64,11 +76,15 @@ prepare 要求输入每条都是 `model_supported_answer` + `reasoning_and_answe
 ## 用户批准后才运行的步骤
 
 以下均不是验收时自动执行的命令。生成与审核密钥由用户/安全环境提前设置。
-新批次可用 `bash factory/reasoning/run_4586_deepseek_reuse.sh pipeline` 一次串联
-生成→导出→科学审核→thinking 审核→分流。默认仍是 validate，不会误启动。
-pipeline 在任何生成请求错误时停止下游；原始产物保留，可先 run 续跑。
-若已完成导出而审核中断，用各阶段命令恢复，不自动覆盖旧 native/reviewed 目录。
-这些恢复规则避免复用已过时的审核输入，也不会停止其他输出目录的已有请求。
+新批次可用 `bash factory/reasoning/run_4586_deepseek_reuse.sh pipeline` 启动
+`stream_distill`：边生成边审核，最后导出分流。默认仍是 validate，不会误启动。
+生成瞬时失败/截断最多续跑三轮，已完成身份跳过；原始事件不删除。如果中断发生
+在收尾导出之前，同一 pipeline 可续跑：重建 offset 队列、跳过已完成审核、重试
+error。pipeline manifest 绑定输入、教师/审核模型、预算、端点与代码身份，不允许
+换配置覆盖旧数据。已存在 native/reviewed 导出时要求显式阶段恢复，不自动覆盖。
+`pipeline_progress.json` 汇总实时 active/enqueued、科学审核与 thinking 审核完成/
+错误计数，错误计数采用最新状态；`solver/progress.json` 是生成当前轮状态。
+`pipeline_report.json` 记录最终分流和缺少完整生成的数量，不保证 4586 条全获支持。
 
 ```bash
 # 会调用 DeepSeek；只在批准后执行。
@@ -80,12 +96,12 @@ bash factory/reasoning/run_4586_deepseek_reuse.sh run
 # 会调用独立审核服务；同一个审核模型即可。
 "$PY" -m factory.reasoning.distill audit \
   --native "$ROOT/native-v1" --out "$ROOT/scientific-audit.jsonl" \
-  --reviewer Kimi-K3 --workers 64 --max-tokens 65536
+  --reviewer Kimi-K3 --workers 500 --max-tokens 65536 --context-window-tokens 262144
 
 "$PY" -m factory.reasoning.distill grade \
   --inputs "$ROOT/inputs" --native "$ROOT/native-v1" \
   --out "$ROOT/reasoning-quality.jsonl" --reviewer Kimi-K3 \
-  --workers 64 --max-tokens 65536
+  --workers 500 --max-tokens 65536 --context-window-tokens 262144
 
 "$PY" -m factory.reasoning.distill select \
   --native "$ROOT/native-v1" --audit "$ROOT/scientific-audit.jsonl" \

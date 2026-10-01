@@ -276,6 +276,9 @@ def audit_row(
         "usage": {"plan": first_response.get("usage") or {},
                   "answer": second_response.get("usage") or {},
                   "consistency": (third_response or {}).get("usage") or {}},
+        "context_budget": {"plan": first_response.get("_context_budget"),
+                           "answer": second_response.get("_context_budget"),
+                           "consistency": (third_response or {}).get("_context_budget")},
     }
 
 

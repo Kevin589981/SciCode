@@ -44,6 +44,30 @@ def normalize_channels(assistant: dict, *, repair_qwen: bool = False) -> tuple[s
     return reasoning, answer, normalization
 
 
+def audit_candidate(task: dict, trace: dict, *, repair_qwen: bool = False) -> dict:
+    """Same byte-serializable candidate for live review and final native export."""
+    validate_trace(trace)
+    if trace["task_hash"] != canonical_hash(task):
+        raise ValueError("candidate task mismatch")
+    trace_student_prompt(task, trace)
+    if trace.get("truncated") or trace.get("finish_reason") != "stop":
+        raise ValueError("incomplete generation")
+    if [m["role"] for m in trace["messages"]] != ["system", "user", "assistant"]:
+        raise ValueError("unexpected message sequence")
+    reasoning, answer, _ = normalize_channels(trace["messages"][-1], repair_qwen=repair_qwen)
+    if not reasoning.strip() or not answer.strip():
+        raise ValueError("missing reasoning or final answer")
+    candidate = copy.deepcopy(trace)
+    candidate["thinking_format"] = "separate_reasoning_content"
+    candidate["audit_prompt_policy"] = "system-user-v1"
+    candidate["archetype"] = task["archetype"]
+    candidate["termination"] = {"finish_reason": trace["finish_reason"],
+                                "truncated": trace["truncated"], "usage": trace.get("usage") or {}}
+    candidate["messages"][-1].update({"reasoning_content": reasoning, "content": answer,
+                                    "reasoning_loss": True, "content_loss": True})
+    return candidate
+
+
 def build(tasks_path: Path, traces_path: Path, out_dir: Path, *,
           policy: str = "scicode-qwen-native-sft-v2",
           expected_teacher: str | None = None,
@@ -165,15 +189,7 @@ def build(tasks_path: Path, traces_path: Path, out_dir: Path, *,
             }
             payload = (json.dumps(row, ensure_ascii=False) + "\n").encode()
             output.write(payload)
-            candidate = copy.deepcopy(trace)
-            candidate["thinking_format"] = "separate_reasoning_content"
-            candidate["audit_prompt_policy"] = "system-user-v1"
-            candidate["archetype"] = task["archetype"]
-            candidate["termination"] = row["metadata"]["termination"]
-            candidate["messages"][-1].update({
-                "reasoning_content": reasoning, "content": answer,
-                "reasoning_loss": True, "content_loss": True,
-            })
+            candidate = audit_candidate(task, trace, repair_qwen=repair_qwen)
             candidates.write(json.dumps(candidate, ensure_ascii=False) + "\n")
             digest.update(payload)
             counts["sft_rows"] += 1

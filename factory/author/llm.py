@@ -89,9 +89,12 @@ def chat(
     timeout: int = 900,
     allow_partial: bool = False,
     extra_body: dict | None = None,
+    client: dict | None = None,
 ) -> dict:
     """Return a complete response, or a marked partial solver response."""
-    cfg = client_config()
+    # An explicit client keeps concurrently running teachers/reviewers isolated;
+    # credentials stay in memory and are never included in returned responses.
+    cfg = client if client is not None else client_config()
     url = cfg["base_url"] + "/chat/completions"
     payload = {
         "model": model or cfg["model"],

@@ -225,6 +225,7 @@ def run_rollouts(
     prompts_path: Path | None = None,
     retry_incomplete: bool = False,
     progress_path: Path | None = None,
+    on_trace_written: Callable | None = None,
 ) -> dict:
     """Roll out admitted tasks with bounded concurrency and exact resume keys."""
     if attempts < 1 or concurrency < 1:
@@ -346,7 +347,7 @@ def run_rollouts(
             prompt_messages=prompts.get(canonical_hash(task)) if prompts_path else None,
         )
 
-    with output_path.open("a", encoding="utf-8") as output, Path(errors_path).open(
+    with output_path.open("ab") as output, Path(errors_path).open(
         "a", encoding="utf-8"
     ) as errors, futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         iterator = iter(jobs)
@@ -374,9 +375,13 @@ def run_rollouts(
                     errors.flush()
                     counts["errors"] += 1
                 else:
-                    output.write(json.dumps(trace, ensure_ascii=False) + "\n")
+                    offset = output.tell()
+                    payload = (json.dumps(trace, ensure_ascii=False) + "\n").encode("utf-8")
+                    output.write(payload)
                     output.flush()
                     counts["written"] += 1
+                    if on_trace_written is not None:
+                        on_trace_written(offset, len(payload))
                 progress()
                 submit_next()
     return counts

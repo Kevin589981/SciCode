@@ -114,7 +114,7 @@ def validate_inputs(inputs: Path, cfg: dict) -> dict:
             "service_capacity": cfg["service_capacity"]}
 
 
-def run(inputs: Path, output: Path, cfg: dict, *, chat_fn=llm.chat) -> dict:
+def run(inputs: Path, output: Path, cfg: dict, *, chat_fn=llm.chat, on_trace_written=None) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     with controller_lock(output / "run", exclusive=True):
         manifest = validate_inputs(inputs, cfg)
@@ -178,6 +178,7 @@ def run(inputs: Path, output: Path, cfg: dict, *, chat_fn=llm.chat) -> dict:
                 timeout=cfg["timeout"], concurrency=cfg["concurrency"],
                 run_variant=cfg["run_variant"], retry_incomplete=cfg["retry_incomplete"],
                 factory_commit=manifest["factory_commit"], progress_path=output / "progress.json",
+                on_trace_written=on_trace_written,
             )
         result.update({"fingerprint": manifest["fingerprint"], "elapsed_seconds": time.time() - started})
         dump(output / "last_run_report.json", result)
@@ -393,8 +394,10 @@ def main() -> None:
         sub.add_argument("--native", type=Path, required=True)
         sub.add_argument("--out", type=Path, required=True)
         sub.add_argument("--reviewer", default="Kimi-K3")
-        sub.add_argument("--workers", type=int, default=64)
+        sub.add_argument("--workers", type=int, default=500)
         sub.add_argument("--max-tokens", type=int, default=65536)
+        sub.add_argument("--context-window-tokens", type=int, default=262144)
+        sub.add_argument("--input-margin-tokens", type=int, default=4096)
         sub.add_argument("--timeout", type=int, default=2400)
         if name == "grade":
             sub.add_argument("--inputs", type=Path, required=True)
@@ -426,14 +429,21 @@ def main() -> None:
                 raise ValueError("set SCICODE_REVIEW_" + name)
             os.environ["SCICODE_LLM_" + name] = value
         os.environ["SCICODE_LLM_MODEL"] = args.reviewer
+        from .review_client import reviewer_chat
+        client = llm.client_config()
+        host = urlparse(client["base_url"]).hostname
+        os.environ["NO_PROXY"] = str(host) + "," + os.environ.get("NO_PROXY", "")
+        os.environ["no_proxy"] = os.environ["NO_PROXY"]
+        chat = reviewer_chat(client, context_window_tokens=args.context_window_tokens,
+                             input_margin_tokens=args.input_margin_tokens)
         if args.command == "audit":
             result = run_audit(args.native / "audit-candidates.jsonl", args.out,
                                model=args.reviewer, workers=args.workers,
-                               max_tokens=args.max_tokens, timeout=args.timeout)
+                               max_tokens=args.max_tokens, timeout=args.timeout, chat_fn=chat)
         else:
             result = grade_reasoning(args.inputs, args.native, args.out, args.reviewer,
                                      workers=args.workers, max_tokens=args.max_tokens,
-                                     timeout=args.timeout)
+                                     timeout=args.timeout, chat_fn=chat)
     else:
         result = select_reviewed(args.native, args.audit, args.out_dir, args.reviewer,
                                  grades_path=args.grades)

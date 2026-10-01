@@ -101,6 +101,18 @@ class StreamingLLMTests(unittest.TestCase):
         self.assertEqual(payload["thinking"], {"type": "enabled"})
         self.assertEqual(payload["reasoning_effort"], "high")
 
+    def test_explicit_review_client_isolated_from_teacher_environment(self):
+        body = event({"content": "review"}) + event(finish_reason="stop")
+        with patch.dict(os.environ, {
+            "SCICODE_LLM_BASE_URL": "http://teacher.test/v1", "SCICODE_LLM_API_KEY": "teacher-key",
+            "SCICODE_LLM_MODEL": "DeepSeek-V4-Flash-0731",
+        }), patch.object(llm.urllib.request, "urlopen", return_value=FakeResponse(body)) as call:
+            llm.chat([], client={"base_url": "http://review.test/v1", "api_key": "review-key", "model": "Kimi-K3"})
+        request = call.call_args.args[0]
+        self.assertEqual(request.full_url, "http://review.test/v1/chat/completions")
+        self.assertEqual(request.headers["Authorization"], "Bearer review-key")
+        self.assertEqual(json.loads(request.data)["model"], "Kimi-K3")
+
 
 if __name__ == "__main__":
     unittest.main()
