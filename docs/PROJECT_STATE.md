@@ -2,7 +2,44 @@
 
 Last updated: 2026-10-02
 
-## Active experiment: DeepSeek regeneration of the remaining Kimi prompts
+## Active experiment: grounded re-audit and code repair (2026-10-02)
+
+User approved fixing overstrict scientific review and launching re-audit / repair.
+Independent branch: `fix/2026-10-02-grounded-audit-and-code-repair`.
+Local/remote tree: `SciCode-audit-repair-20261002` within their usual parent.
+New output: `data-reasoning-grounded-audit-repair-20261002-v1`.
+The two preceding batches have ended; preserve ALL their artifacts unmodified.
+Expected inventory: 9,438 complete candidates; preserve 2,870 previously ready
+Python examples and re-audit the remaining 6,568, including all 6,366 quarantine
+rows, unresolved reviews and incomplete/non-Python dataset qualifications.
+Two original unfinished generations are outside this complete-candidate inventory.
+
+New policy binds proposed requirements and issues to literal original task/answer
+quotes, separates critical/repairable/advisory/unresolved issues, and gives the
+third adjudication role the FULL original prompt and FULL answer. Cosmetic order
+is not a scientific veto; real legitimate-domain code/science errors still block.
+Teacher DeepSeek-V4-Flash-0731 / 500 generation workers, reviewer Kimi-K3 / 500
+shared review workers; both context budgets 262,144. Teacher answer output budget
+196,608; reviewer requested output budget 131,072, dynamically bounded by input.
+Task-only repair uses 65,536 output tokens. One writer, bounded submission, stage
+caches, independent provider circuit breakers, and up to three recovery passes.
+No SQLite task queue and no per-task completion-table scans in this new runner.
+
+Re-audit every selected old answer before generating. Accept supported old answers
+only with productive CoT AND complete Python. Otherwise generate at most two fresh
+CoT/code revisions and re-audit/re-grade each; flawed questions can be explicitly
+rewritten with provenance. Feedback is fallible, visible in the new training user
+message, and NOT authoritative task requirements. This is a feedback-assisted
+repair experiment, NOT an exact-prompt controlled distillation comparison.
+Retain native reasoning AND final answer in raw, candidates and SFT. Never drop
+final answers silently. Uncertain/unresolved, untrainable or exhausted samples stay
+in separate partitions; no humans required, no silent wholesale admission.
+Python syntax/model checks are NOT execution proof; model support is NOT scientific
+proof. Previously ready examples are preserved, not retroactively certified v3.
+No SFT training, deployment, database writes or unrelated workspaces are in scope.
+Details: `docs/experiments/2026-10-02-grounded-audit-repair.md`.
+
+## Previous experiment: DeepSeek regeneration of the remaining Kimi prompts
 
 User authorized computing the old 9,440 minus current 4,586 prompt population
 and independently launching the complement while they are away. The actual

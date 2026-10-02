@@ -1,0 +1,16 @@
+{
+  "model": "DeepSeek-V4-Flash-0731",
+  "teacher_revision": "DeepSeek-V4-Flash-0731; deployment alias, checkpoint digest not exposed",
+  "base_url": "http://10.100.184.69:4000/v1",
+  "temperature": 0.7,
+  "request_options": {"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
+  "max_tokens": 196608,
+  "context_window_tokens": 262144,
+  "input_margin_tokens": 4096,
+  "timeout": 2400,
+  "concurrency": 500,
+  "service_capacity": 2000,
+  "attempts": 1,
+  "run_variant": "deepseek-v4flash-0731-grounded-code-repair-20261002-v1",
+  "retry_incomplete": true
+}
