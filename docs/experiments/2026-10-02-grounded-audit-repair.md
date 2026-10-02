@@ -14,6 +14,11 @@ full source and answer; no model-generated checklist is treated as authority.
 Critical issues require an original-domain case with expected/delivered results.
 Missing explanation/deliverables are repairable; narrative order is advisory.
 Unknown essential facts remain unresolved, never treated as false by assumption.
+Quote format repair accepts ONLY unique whitespace/source-role differences; it
+stores both reported and literal source evidence. Words, punctuation, mathematical
+operators and paraphrases are never fuzzily repaired. Real v1 smoke surfaced this
+transport/format issue, so v2 lives in a separate remote worktree without stopping
+v1 in-flight requests. The production branch has the `-v2` suffix.
 
 Review only final answers for scientific/code correctness; productive-CoT grading
 also reads native reasoning. Old valid grades are reused only when bound to the
@@ -67,9 +72,10 @@ requested max completion 131,072, reduced only to fit complete input, never by
 truncating input. Task rewrite max completion 65,536. Gateway token estimates are
 marked as estimates; actual reported input+output is checked when available.
 
-Paths relative to the new remote tree:
+Remote tree: `/root/ScienceIDE-workspace/SciCode-audit-repair-20261002-v2`.
+Paths relative to this tree:
 
-- `data-reasoning-grounded-audit-repair-20261002-v1/inputs/manifest.json`: selection.
+- `data-reasoning-grounded-audit-repair-20261002-v2/inputs/manifest.json`: selection.
 - `.../progress.json`: current work and provider state.
 - `.../audits.jsonl`, `grades.jsonl`, `generations.jsonl`, `outcomes.jsonl`: journals.
 - `.../items/<hash>/`: cached reviews, full generations, terminal outcome and SFT.

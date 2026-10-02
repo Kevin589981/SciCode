@@ -21,6 +21,23 @@ def python_blocks(answer):
             if language.strip().lower() in {"python", "py", "python3"}]
 
 
+def anchor_quote(quote, sources, *, role=None, minimum=8):
+    """Repair only unique whitespace/role formatting, never words or symbols."""
+    if not isinstance(quote, str) or len(quote) < minimum:
+        raise AuditError('source quote is too short or non-text')
+    if role is not None and quote in sources.get(role, ''):
+        return role, quote, None
+    if role is None and any(quote in s for s in sources.values()):
+        return None, quote, None
+    pattern = r'\s+'.join(re.escape(w) for w in re.findall(r'\S+', quote))
+    matches = [(r, m.group()) for r, text in sources.items() for m in re.finditer(pattern, text)]
+    if len(matches) != 1:
+        raise AuditError('source_quote must be an exact original substring (or uniquely whitespace-equivalent)')
+    found_role, literal = matches[0]
+    return found_role, literal, {'reported_quote':quote,'reported_role':role,
+                                'repair':'unique whitespace and/or source-role normalization'}
+
+
 def code_gate(answer, assessment):
     blocks = python_blocks(answer)
     indices = assessment.get("implementation_block_indices")
@@ -69,8 +86,11 @@ def validate_plan(value, sources):
             raise AuditError("invalid requirement identity/scope")
         quote = r.get("source_quote")
         role = r.get("source_role")
-        if not isinstance(quote, str) or len(quote) < 8 or quote not in sources.get(role, ""):
-            raise AuditError("requirement source_quote must be an exact original system/user substring")
+        if role not in {'system','user'}:
+            raise AuditError('invalid original source_role')
+        actual_role, literal, repair = anchor_quote(quote,sources,role=role)
+        r.update(source_role=actual_role,source_quote=literal)
+        if repair: r['quote_format_repair']=repair
         if not isinstance(r.get("requirement"), str) or not r["requirement"].strip():
             raise AuditError("missing requirement")
     return value
@@ -93,11 +113,17 @@ def validate_verdict(value, sources, answer, plan):
         if req_id is not None and req_id not in requirements:
             raise AuditError("unknown issue requirement")
         quote = issue.get("question_quote")
-        if not isinstance(quote, str) or len(quote) < 8 or not any(quote in s for s in sources.values()):
-            raise AuditError("issue question_quote is not literal original question evidence")
+        _, literal, repair = anchor_quote(quote,sources)
+        issue['question_quote']=literal
+        if repair: issue['question_quote_format_repair']=repair
         evidence = issue.get("answer_quote")
-        if evidence != "absent" and (not isinstance(evidence, str) or len(evidence) < 4 or evidence not in answer):
-            raise AuditError("issue answer_quote is not a literal contiguous answer substring")
+        if evidence != 'absent':
+            try:
+                _, literal, repair = anchor_quote(evidence,{'answer':answer},minimum=4)
+            except AuditError as exc:
+                raise AuditError('issue answer_quote is not a literal contiguous answer substring') from exc
+            issue['answer_quote']=literal
+            if repair: issue['answer_quote_format_repair']=repair
         if not isinstance(issue.get("explanation"), str) or not issue["explanation"].strip():
             raise AuditError("missing issue explanation")
         if category in {"scientific_error", "implementation_error"}:
@@ -127,6 +153,8 @@ be verified, use uncertain, not a made-up expected answer. Inspect approximation
 assumptions and rounding conventions before declaring a contradiction.
 Every requirement/issue needs literal source quotes: copy contiguous substrings
 without ellipses, paraphrases, added quotation marks, or LaTeX reformatting.
+Prefer SHORT quotes (8-120 characters) and express details in the requirement or
+explanation. Label source_role correctly; do not copy system quotes as user quotes.
 """
 
 SCHEMA = """Return ONLY a JSON object with:

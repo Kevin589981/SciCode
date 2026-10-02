@@ -51,6 +51,16 @@ def test_invented_source_requirement_fails():
         validate_plan(p,{'user':QUESTION})
 
 
+def test_only_unique_whitespace_or_role_changes_are_repaired():
+    p=plan(); p['requirements'][0].update(source_quote='Be strictly scientific.',source_role='user')
+    validate_plan(p,{'system':'Be strictly\nscientific.','user':QUESTION})
+    assert p['requirements'][0]['source_role']=='system'
+    assert p['requirements'][0]['source_quote']=='Be strictly\nscientific.'
+    assert p['requirements'][0]['quote_format_repair']['reported_role']=='user'
+    p['requirements'][0]['source_quote']='Be extra strictly scientific.'
+    with pytest.raises(AuditError): validate_plan(p,{'system':'Be strictly\nscientific.','user':QUESTION})
+
+
 def test_presentation_cannot_be_critical():
     v=verdict([{'requirement_id':'R1','category':'presentation','severity':'critical'}])
     with pytest.raises(AuditError,match='severity'):

@@ -11,6 +11,6 @@
   "concurrency": 500,
   "service_capacity": 2000,
   "attempts": 1,
-  "run_variant": "deepseek-v4flash-0731-grounded-code-repair-20261002-v1",
+  "run_variant": "deepseek-v4flash-0731-grounded-code-repair-20261002-v2",
   "retry_incomplete": true
 }

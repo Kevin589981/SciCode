@@ -5,19 +5,26 @@ Last updated: 2026-10-02
 ## Active experiment: grounded re-audit and code repair (2026-10-02)
 
 User approved fixing overstrict scientific review and launching re-audit / repair.
-Independent branch: `fix/2026-10-02-grounded-audit-and-code-repair`.
-Local/remote tree: `SciCode-audit-repair-20261002` within their usual parent.
-New output: `data-reasoning-grounded-audit-repair-20261002-v1`.
+Independent branch: `fix/2026-10-02-grounded-audit-and-code-repair-v2`.
+Local tree: `SciCode-audit-repair-20261002`; remote tree:
+`/root/ScienceIDE-workspace/SciCode-audit-repair-20261002-v2`.
+New output: `data-reasoning-grounded-audit-repair-20261002-v2`.
+The v1 worktree/smoke is frozen; do not stop its existing model requests.
 The two preceding batches have ended; preserve ALL their artifacts unmodified.
 Expected inventory: 9,438 complete candidates; preserve 2,870 previously ready
 Python examples and re-audit the remaining 6,568, including all 6,366 quarantine
 rows, unresolved reviews and incomplete/non-Python dataset qualifications.
 Two original unfinished generations are outside this complete-candidate inventory.
+Server inventory verified: selected=6,568, preserved=2,870, old dispositions
+quarantine=6,366 / supported=72 / reasoning_candidate=129 / audit_error=1.
 
 New policy binds proposed requirements and issues to literal original task/answer
 quotes, separates critical/repairable/advisory/unresolved issues, and gives the
 third adjudication role the FULL original prompt and FULL answer. Cosmetic order
 is not a scientific veto; real legitimate-domain code/science errors still block.
+Real gateway smoke revealed line-wrap and system/user role mislabelling in quotes.
+Repair only uniquely located whitespace/role differences, retaining reported and
+canonical quotes; never approximate words, punctuation, comparators or meaning.
 Teacher DeepSeek-V4-Flash-0731 / 500 generation workers, reviewer Kimi-K3 / 500
 shared review workers; both context budgets 262,144. Teacher answer output budget
 196,608; reviewer requested output budget 131,072, dynamically bounded by input.

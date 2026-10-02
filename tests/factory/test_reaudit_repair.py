@@ -6,7 +6,7 @@ import pytest
 
 from factory.reasoning.distill import run as old_run, export, select_reviewed, REASONING_REVIEW_POLICY
 from factory.reasoning.prepare_reused_tasks import rows
-from factory.reasoning.reaudit_repair import prepare, run
+from factory.reasoning.reaudit_repair import prepare, run, read_candidate
 from factory.reasoning.scientific_audit import POLICY as OLD_AUDIT
 from tests.factory.test_distill import inputs, config, response
 from tests.factory_fixtures import grade_for
@@ -78,3 +78,28 @@ def test_live_reaudit_promotes_or_regenerates_and_preserves_original(tmp_path,ne
     resumed=run(prepared,tmp_path/'new-output',cfg,reviewer={'model':'Kimi-K3','base_url':'http://example.test/v1','api_key':'test'},
                 review_workers=2,generation_workers=2,teacher_fn=lambda *_a,**_k:pytest.fail('no repeat teacher'),review_fn=lambda *_a,**_k:pytest.fail('no repeat review'))
     assert resumed['outcomes']=={category:1}
+
+
+def test_inventory_refuses_task_or_source_changes(tmp_path,monkeypatch):
+    monkeypatch.setenv('SCICODE_LLM_API_KEY','test-key')
+    source,_,_=legacy(tmp_path,'```python\ndef solve(x):\n    return x*x\n```')
+    prepared=tmp_path/'repair-inputs'; prepare([source],prepared)
+    job=list(rows(prepared/'jobs.jsonl'))[0]
+    job['task']['problem']['question']+=' silent edit'
+    with pytest.raises(ValueError,match='identity mismatch'): read_candidate(job)
+    original=source/'reviewed-v1/sft.jsonl'
+    with original.open('a') as out: out.write('\n')
+    with pytest.raises(ValueError,match='legacy source changed'):
+        run(prepared,tmp_path/'new-output',config(),reviewer={'model':'Kimi-K3','base_url':'http://example.test/v1','api_key':'test'},
+            review_workers=1,generation_workers=1,teacher_fn=lambda *_a,**_k:pytest.fail('no generation'),review_fn=reviewer_fn())
+
+
+def test_writer_failure_is_not_a_blocked_queue(tmp_path,monkeypatch):
+    monkeypatch.setenv('SCICODE_LLM_API_KEY','test-key')
+    source,_,_=legacy(tmp_path,'```python\ndef solve(x):\n    return x*x\n```')
+    prepared=tmp_path/'repair-inputs'; prepare([source],prepared)
+    output=tmp_path/'new-output'; output.mkdir()
+    (output/'audits.jsonl').mkdir()
+    with pytest.raises(RuntimeError,match='writer failed'):
+        run(prepared,output,config(),reviewer={'model':'Kimi-K3','base_url':'http://example.test/v1','api_key':'test'},
+            review_workers=1,generation_workers=1,teacher_fn=lambda *_a,**_k:pytest.fail('no generation'),review_fn=reviewer_fn())
